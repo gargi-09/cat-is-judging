@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cat-is-judging"
+version = "0.1.0"
+description = "Neurosymbolic faithfulness auditor for RAG and multi-agent systems"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+maritime = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+]
+dev = [
+    "pytest>=8",
+]
+
+[tool.setuptools.packages.find]
+include = ["cat_is_judging*", "applications*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,33 @@
+# Environment
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.claude/
+
+# Python caches & build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Data (raw drop is 26 MB, built DB is 11 MB, and the DB is rebuilt from raw anyway)
+applications/maritime_threat_detection/data/
+*.db
+*.db.tmp
+*.sqlite
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
