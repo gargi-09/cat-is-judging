@@ -31,3 +31,5 @@ applications/maritime_threat_detection/data/
 .idea/
 .DS_Store
 Thumbs.db
+# Local-only developer dashboard (python -m dashboard)
+dashboard/

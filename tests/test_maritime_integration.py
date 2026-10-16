@@ -218,7 +218,7 @@ def test_position_at_stationary_hold_only_when_stationary(track_db: sqlite3.Conn
 # ------------------------------------------------------ built DB (optional) ----
 
 
-@pytest.mark.skipif(not DB_PATH.exists(), reason="run scripts/ingest_telemetry.py first")
+@pytest.mark.skipif(not DB_PATH.exists(), reason="needs the raw dataset (not distributed); runs only where maritime.db has been built")
 def test_built_database_invariants() -> None:
     conn = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []

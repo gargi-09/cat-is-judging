@@ -36,8 +36,7 @@ import pandas as pd
 
 from applications.maritime_threat_detection import ANNOTATIONS_DIR, DATA_PROCESSED, DATA_RAW, DB_PATH
 from applications.maritime_threat_detection.db import apply_schema, connect
-from applications.maritime_threat_detection.db.ais_repository import position_at
-from applications.maritime_threat_detection.geo import S2_TILE_GRID, haversine_m, latlon_to_pixel
+from applications.maritime_threat_detection.reconciliation import cross_reference
 from applications.maritime_threat_detection.tools.vision_tools import OpticalTile, load_all_tiles
 
 REQUIRED_COLUMNS: tuple[str, ...] = (
@@ -49,15 +48,6 @@ STATIC_COLUMNS: tuple[str, ...] = (
     "imo", "callsign", "vessel_name", "vessel_type", "dim_a", "dim_b", "dim_c", "dim_d",
     "length_m", "width_m", "flag_ctry",
 )
-
-# A detection is "corroborated" when its AIS-reported position at acquisition time lies
-# within this radius of the optical hull centre. Observed residuals are ~110 m median /
-# ~225 m p90; the slack covers antenna-to-centre offsets on 300 m+ hulls and minute-level
-# AIS decimation, while true identity mismatches in this data sit at 1.4-58 km.
-CORROBORATION_RADIUS_M: float = 500.0
-# AIS positions this close to a chip edge are excluded from ghost candidates: the hull may
-# be cut by the chip boundary and legitimately unannotated.
-GHOST_EDGE_INSET_PX: float = 5.0
 
 
 # --------------------------------------------------------------------------- AIS -----
@@ -220,94 +210,6 @@ def write_optical(conn: Any, tiles: list[OpticalTile]) -> int:
 
 
 # ----------------------------------------------------------------------- report ------
-
-
-def _pct(values: list[float], q: float) -> float:
-    s = sorted(values)
-    return s[min(len(s) - 1, int(round(q * (len(s) - 1))))]
-
-
-def cross_reference(conn: Any) -> dict[str, Any]:
-    """Reconcile every optical detection against AIS, and every AIS fix against optics.
-
-    Detection classes (per annotated hull):
-      corroborated         MMSI known, AIS position at acquisition within CORROBORATION_RADIUS_M
-      position_discrepancy MMSI known, AIS places it elsewhere (spoofing / identity misuse candidate)
-      ais_silent           MMSI known, but no AIS fix close enough in time to place it
-      unregistered_mmsi    label parses to an MMSI absent from the AIS feed (dark vessel)
-      no_identity          label is 0 / "unknown" / unparseable (dark vessel)
-    Ghost AIS candidates: AIS places a vessel inside a chip at acquisition time, but no hull
-    in that chip carries its MMSI.
-    """
-    registry = {r[0] for r in conn.execute("SELECT mmsi FROM vessels")}
-    tiles = conn.execute("SELECT * FROM optical_tiles").fetchall()
-    dets = conn.execute("SELECT * FROM optical_detections").fetchall()
-    epochs = {t["tile_id"]: t["acquired_epoch"] for t in tiles}
-
-    pos_cache: dict[tuple[int, int], Any] = {}
-
-    def pos(mmsi: int, epoch: int) -> Any:
-        key = (mmsi, epoch)
-        if key not in pos_cache:
-            pos_cache[key] = position_at(conn, mmsi, epoch)
-        return pos_cache[key]
-
-    classes: Counter[str] = Counter()
-    residuals: list[float] = []
-    methods: Counter[str] = Counter()
-    discrepancies: list[dict[str, Any]] = []
-    for d in dets:
-        if d["mmsi"] is None:
-            classes["no_identity"] += 1
-            continue
-        if d["mmsi"] not in registry:
-            classes["unregistered_mmsi"] += 1
-            continue
-        p = pos(d["mmsi"], epochs[d["tile_id"]])
-        if p is None:
-            classes["ais_silent"] += 1
-            continue
-        methods[p.method] += 1
-        r = haversine_m(d["center_lat"], d["center_lon"], p.lat, p.lon)
-        residuals.append(r)
-        if r <= CORROBORATION_RADIUS_M:
-            classes["corroborated"] += 1
-        else:
-            classes["position_discrepancy"] += 1
-            discrepancies.append({"tile_id": d["tile_id"], "mmsi": d["mmsi"], "residual_m": round(r)})
-
-    annotated = {(d["tile_id"], d["mmsi"]) for d in dets if d["mmsi"] is not None}
-    ghosts: list[dict[str, Any]] = []
-    for t in tiles:
-        grid = S2_TILE_GRID[t["mgrs_tile"]]
-        for mmsi in registry:
-            p = pos(mmsi, t["acquired_epoch"])
-            if p is None or not (t["lat_min"] <= p.lat <= t["lat_max"] and t["lon_min"] <= p.lon <= t["lon_max"]):
-                continue
-            col, row = latlon_to_pixel(grid, p.lat, p.lon)
-            lx, ly = col - t["px_x"], row - t["px_y"]
-            inside = (
-                GHOST_EDGE_INSET_PX <= lx <= t["width_px"] - GHOST_EDGE_INSET_PX
-                and GHOST_EDGE_INSET_PX <= ly <= t["height_px"] - GHOST_EDGE_INSET_PX
-            )
-            if inside and (t["tile_id"], mmsi) not in annotated:
-                ghosts.append({"tile_id": t["tile_id"], "mmsi": mmsi, "fix_age_s": p.fix_age_s})
-
-    return {
-        "detections_total": len(dets),
-        "detection_classes": dict(classes),
-        "ais_position_method": dict(methods),
-        "residual_m": (
-            {"median": round(statistics.median(residuals), 1), "p90": round(_pct(residuals, 0.9), 1),
-             "p99": round(_pct(residuals, 0.99), 1), "max": round(max(residuals), 1)}
-            if residuals else None
-        ),
-        "position_discrepancies": sorted(discrepancies, key=lambda x: -x["residual_m"]),
-        "ghost_ais_candidates": len(ghosts),
-        "ghost_ais_candidate_vessels": len({g["mmsi"] for g in ghosts}),
-        "ghost_ais_examples": ghosts[:10],
-        "ais_vessels_never_annotated": len(registry - {d["mmsi"] for d in dets}),
-    }
 
 
 def table_summary(conn: Any) -> dict[str, Any]:

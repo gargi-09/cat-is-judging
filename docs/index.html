@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cat-is-Judging Sandbox</title>
+<meta name="description" content="Interactive developer sandbox for Cat-is-Judging, a neurosymbolic faithfulness auditor, demonstrated on dark-vessel detection from Sentinel-2 imagery and AIS telemetry.">
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #ffffff; --surface-2: #eef1f5; --border: #d9dee6;
+    --text: #161a20; --muted: #5b6573; --accent: #3a5bd9; --accent-ink: #ffffff;
+    --ok: #1d8a4a; --warn: #b7791f; --bad: #c53030; --ghost: #b4307e; --info: #2b6cb0;
+    --ok-bg: #e5f4eb; --warn-bg: #fcf2df; --bad-bg: #fce7e7; --info-bg: #e7effb; --ghost-bg: #f9e6f1;
+    --sea: #0d2236; --sea-grid: rgba(255,255,255,.06); --hull: #e8edf3;
+    --term-bg: #0e1116; --term-text: #c9d1d9;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1014; --surface: #151a20; --surface-2: #1c222a; --border: #29313b;
+      --text: #e6e9ee; --muted: #98a2b0; --accent: #7b96ff; --accent-ink: #0d1014;
+      --ok: #4ec27f; --warn: #e8c14e; --bad: #f47c7c; --ghost: #f07fbe; --info: #67b0ee;
+      --ok-bg: #15301f; --warn-bg: #33290f; --bad-bg: #3a1919; --info-bg: #14263b; --ghost-bg: #36172a;
+      --sea: #08131f; --hull: #dfe6ee; --term-bg: #090c10;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1014; --surface: #151a20; --surface-2: #1c222a; --border: #29313b;
+    --text: #e6e9ee; --muted: #98a2b0; --accent: #7b96ff; --accent-ink: #0d1014;
+    --ok: #4ec27f; --warn: #e8c14e; --bad: #f47c7c; --ghost: #f07fbe; --info: #67b0ee;
+    --ok-bg: #15301f; --warn-bg: #33290f; --bad-bg: #3a1919; --info-bg: #14263b; --ghost-bg: #36172a;
+    --sea: #08131f; --hull: #dfe6ee; --term-bg: #090c10;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+  header.top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent);
+               backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  header.top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+  .brand { font-weight: 700; text-decoration: none; color: var(--text); white-space: nowrap; }
+  .brand span { color: var(--muted); font-weight: 500; }
+  header nav { display: flex; gap: 18px; overflow-x: auto; flex: 1; scrollbar-width: none; }
+  header nav a { color: var(--muted); text-decoration: none; font-size: .9rem; white-space: nowrap; }
+  header nav a:hover { color: var(--text); }
+  .btn { font: inherit; font-weight: 600; font-size: .88rem; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+         border: 1px solid transparent; background: var(--accent); color: var(--accent-ink); white-space: nowrap; }
+  .btn.ghost { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn.small { padding: 4px 10px; font-size: .8rem; font-weight: 500; }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .hero { padding-top: 56px; padding-bottom: 32px; }
+  .hero h1 { font-size: clamp(1.9rem, 4vw, 2.7rem); line-height: 1.15; margin: 0 0 14px; letter-spacing: -.02em; max-width: 820px; }
+  .hero p.lede { font-size: 1.1rem; color: var(--muted); max-width: 760px; margin: 0 0 22px; }
+  .hero .cta { display: flex; gap: 10px; flex-wrap: wrap; }
+  .hero .cta a { text-decoration: none; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 28px; font-size: .85rem; color: var(--muted); }
+  .flow b { background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 4px 12px; color: var(--text); font-weight: 500; }
+  section { padding: 40px 0; scroll-margin-top: 60px; }
+  section h2 { font-size: 1.5rem; margin: 0 0 6px; letter-spacing: -.01em; }
+  section > .wrap > p.sub, .sub { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .sim { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 16px; }
+  .mapbox { padding: 12px; }
+  .mapbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .clock { font-family: var(--mono); font-size: .9rem; background: var(--surface-2); border-radius: 8px; padding: 5px 10px; }
+  select, input[type=checkbox] { accent-color: var(--accent); }
+  select { font: inherit; font-size: .85rem; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+  canvas#map { width: 100%; aspect-ratio: 1 / 1; display: block; border-radius: 10px; cursor: crosshair; background: var(--sea); }
+  .layers { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--muted); margin-top: 10px; }
+  .layers label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .78rem; color: var(--muted); margin-top: 8px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .side .panel { padding: 14px 16px; }
+  .side h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 10px; }
+  .inject { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .inject button { text-align: left; font-size: .8rem; line-height: 1.3; padding: 8px 10px; }
+  .inject button small { display: block; color: var(--muted); font-weight: 400; font-size: .72rem; }
+  .sel { font-size: .84rem; min-height: 72px; }
+  .sel dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+  .sel dt { color: var(--muted); }
+  .sel dd { margin: 0; font-family: var(--mono); font-size: .8rem; overflow-wrap: anywhere; }
+  .log { font-family: var(--mono); font-size: .74rem; line-height: 1.5; background: var(--term-bg); color: var(--term-text);
+         border-radius: 8px; padding: 10px; height: 230px; overflow-y: auto; }
+  .log div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lv-INFO { color: #79c0ff; } .lv-WARN { color: #e3b341; } .lv-ALERT { color: #ff7b72; font-weight: 700; } .lv-OK { color: #56d364; } .lv-SIM { color: #8b949e; }
+  .tablewrap { overflow-x: auto; margin-top: 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  td.num { font-family: var(--mono); font-size: .82rem; }
+  .tag { display: inline-block; font-size: .74rem; font-weight: 600; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+  .t-corroborated, .t-shipped { background: var(--ok-bg); color: var(--ok); }
+  .t-position_discrepancy { background: var(--bad-bg); color: var(--bad); }
+  .t-ais_silent, .t-next { background: var(--warn-bg); color: var(--warn); }
+  .t-matched { background: var(--ok-bg); color: var(--ok); }
+  .t-potential_going_dark { background: var(--bad-bg); color: var(--bad); }
+  .t-unresolved_gap { background: var(--warn-bg); color: var(--warn); }
+  .t-dark_vessel, .t-invalid_identity, .t-unmatched_identity, .t-ghost_ais { background: var(--ghost-bg); color: var(--ghost); }
+  .t-small_craft { background: var(--info-bg); color: var(--info); }
+  .t-planned { background: var(--surface-2); color: var(--muted); }
+  .t-preview { background: var(--info-bg); color: var(--info); }
+  .empty { color: var(--muted); font-size: .88rem; padding: 18px 4px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tabs button { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  .tabs button[aria-selected=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .snippet { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; overflow: hidden; }
+  .code, .log, pre.qs { color-scheme: dark; }
+  .code { background: var(--term-bg); color: var(--term-text); padding: 16px 18px; font-family: var(--mono); font-size: .8rem; line-height: 1.6;
+          overflow-x: auto; margin: 0; white-space: pre; border-right: 1px solid #222a33; }
+  .code .k { color: #ff7b72; } .code .s { color: #a5d6ff; } .code .c { color: #8b949e; font-style: italic; } .code .f { color: #d2a8ff; } .code .n { color: #79c0ff; }
+  .runpane { display: flex; flex-direction: column; background: var(--term-bg); min-width: 0; }
+  .runbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #222a33; }
+  .runbar .meta { font-size: .76rem; color: #8b949e; }
+  .runpane .log { height: auto; min-height: 260px; max-height: 420px; flex: 1; border-radius: 0; }
+  .snipdesc { padding: 12px 16px; font-size: .88rem; color: var(--muted); border-top: 1px solid var(--border); grid-column: 1 / -1; background: var(--surface); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .stat { padding: 16px; }
+  .stat b { display: block; font-size: 1.6rem; letter-spacing: -.02em; }
+  .stat span { color: var(--muted); font-size: .84rem; }
+  pre.qs { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: .84rem; padding: 16px 18px; border-radius: var(--radius); overflow-x: auto; margin: 0; }
+  pre.qs .c { color: #8b949e; }
+  footer { padding: 32px 0 48px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); margin-top: 24px; }
+  @media (max-width: 900px) {
+    .sim, .snippet { grid-template-columns: 1fr; }
+    .code { border-right: 0; border-bottom: 1px solid #222a33; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding: 0 16px; }
+    .inject { grid-template-columns: 1fr; }
+    header nav { display: none; }
+    .brand span { display: none; }
+    header.top .wrap { gap: 10px; justify-content: space-between; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">Cat-is-Judging <span>sandbox</span></a>
+    <nav>
+      <a href="#simulator">Simulator</a><a href="#sandbox">SDK sandbox</a><a href="#matrix">Support matrix</a>
+      <a href="#benchmark">Benchmark</a><a href="#quickstart">Quick start</a>
+    </nav>
+    <button class="btn ghost small" id="theme" aria-label="Toggle colour theme">Theme</button>
+    <a class="btn small" href="https://github.com/gargi-09/cat-is-judging">GitHub</a>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <h1>Catch the claims an AI agent can't back up.</h1>
+  <p class="lede">Cat-is-Judging is an open-source neurosymbolic faithfulness auditor for LLM agents. It checks every claim an agent makes against deterministic ground truth, then fuses that with multi-sample consistency into one score. The flagship demo is maritime: reconciling Sentinel-2 satellite imagery with AIS transponder data to expose dark vessels, spoofers and phantom signals.</p>
+  <div class="cta">
+    <a class="btn" href="#simulator">Open the simulator</a>
+    <a class="btn ghost" href="#sandbox">Run the SDK sandbox</a>
+  </div>
+  <div class="flow" aria-label="Pipeline">
+    <b>AIS + Sentinel-2</b>→<b>Ground-truth DB</b>→<b>Typed tools</b>→<b>Recon agent</b>→<b>Symbolic auditor</b>→<b>Alert / block</b>
+  </div>
+</div>
+
+<!-- ========================================================== SIMULATOR -->
+<section id="simulator">
+  <div class="wrap">
+    <h2>AIS telemetry simulator</h2>
+    <p class="sub">A live sea area with ships and their AIS transponder reports. Inject a threat, then trigger a satellite pass: the reconciliation logic compares what the satellite sees with what AIS claims and classifies every hull. Click a ship or AIS point to inspect it.</p>
+    <div class="sim">
+      <div class="panel mapbox">
+        <div class="mapbar">
+          <button class="btn" id="pass">Trigger satellite pass</button>
+          <button class="btn ghost small" id="play" aria-pressed="true">Pause</button>
+          <label class="sub" style="margin:0;font-size:.82rem">Speed
+            <select id="speed"><option value="10">10×</option><option value="60" selected>60×</option><option value="300">300×</option><option value="900">900×</option></select>
+          </label>
+          <label class="sub" style="margin:0;font-size:.82rem">Colour by
+            <select id="colorby"><option value="identity" selected>identity check</option><option value="blind">blind match</option></select>
+          </label>
+          <span class="clock" id="clock">—</span>
+        </div>
+        <canvas id="map" width="900" height="900" aria-label="Simulated sea area with ships, AIS reports and the satellite footprint"></canvas>
+        <div class="layers">
+          <label><input type="checkbox" id="lyr-hulls" checked> Physical hulls (what the satellite sees)</label>
+          <label><input type="checkbox" id="lyr-ais" checked> AIS reports (what transponders claim)</label>
+          <label><input type="checkbox" id="lyr-truth" checked> Reveal ground truth links</label>
+        </div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--ok)"></span>Corroborated / matched</span>
+          <span><span class="sw" style="background:var(--bad)"></span>Spoofing / going dark</span>
+          <span><span class="sw" style="background:var(--warn)"></span>AIS gap / unresolved (not a threat)</span>
+          <span><span class="sw" style="background:var(--ghost)"></span>Dark vessel / bad identity / ghost AIS</span>
+          <span><span class="sw" style="background:var(--info)"></span>AIS report · small craft</span>
+        </div>
+      </div>
+      <div class="side">
+        <div class="panel">
+          <h3>Inject a threat vector</h3>
+          <div class="inject">
+            <button class="btn ghost" data-inject="dark">Dark vessel<small>Hull with no transponder identity</small></button>
+            <button class="btn ghost" data-inject="unregistered">Unregistered MMSI<small>Identity never seen on AIS</small></button>
+            <button class="btn ghost" data-inject="spoofer">AIS spoofer<small>Broadcasts a false position</small></button>
+            <button class="btn ghost" data-inject="ghost">Ghost AIS<small>Signal with no ship behind it</small></button>
+            <button class="btn ghost" data-inject="beacon">Beacon MMSI<small>Hull using an emergency-beacon ID</small></button>
+            <button class="btn ghost" data-inject="small">Small craft<small>&lt; 30 m, no AIS: must NOT alarm</small></button>
+            <button class="btn ghost" data-inject="gone_dark">Switch AIS off<small>A real ship goes silent</small></button>
+            <button class="btn ghost" data-inject="reset">Reset scenario<small>Fresh fleet, one of each threat</small></button>
+          </div>
+        </div>
+        <div class="panel sel" id="selected"><h3>Selected</h3><div class="empty" style="padding:0">Click a hull or an AIS point on the map.</div></div>
+        <div class="panel">
+          <h3>Event log</h3>
+          <div class="log" id="simlog" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel tablewrap" id="results"><div class="empty">No satellite pass yet. The first pass fires automatically at 06:46:59 UTC (sim time), or press “Trigger satellite pass”.</div></div>
+  </div>
+</section>
+
+<!-- ============================================================ SANDBOX -->
+<section id="sandbox">
+  <div class="wrap">
+    <h2>SDK sandbox</h2>
+    <p class="sub">Real SDK code on the left. <b>Execute SDK Sandbox</b> runs the equivalent logic in your browser against the simulator's current state and streams the detection log. The first three snippets are shipped APIs; the last previews the Phase 2 auditor.</p>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="panel snippet" id="snippet"></div>
+  </div>
+</section>
+
+<!-- ============================================================= MATRIX -->
+<section id="matrix">
+  <div class="wrap">
+    <h2>SDK feature support matrix</h2>
+    <p class="sub">What ships today, what's next, and what you can try on this page.</p>
+    <div class="panel tablewrap" style="margin-top:0" id="matrix-table"></div>
+  </div>
+</section>
+
+<!-- ========================================================== BENCHMARK -->
+<section id="benchmark">
+  <div class="wrap">
+    <h2>Results on real data</h2>
+    <p class="sub">The simulator is synthetic; these numbers are not. One day of AIS (2026-03-03, 52,548 fixes, 182 vessels) reconciled against 475 annotated ships in 183 Sentinel-2 chips over the Gulf of Oman.</p>
+    <div class="stats">
+      <div class="panel stat"><b>99.5%</b><span>blind-association precision (labels ignored, then used to score)</span></div>
+      <div class="panel stat"><b>97.5%</b><span>blind recall on ships AIS can place at image time</span></div>
+      <div class="panel stat"><b>0.4%</b><span>false dark-vessel alarms (2 of 475)</span></div>
+      <div class="panel stat"><b>10</b><span>spoofing candidates from identity checks, 1.4–58 km off</span></div>
+      <div class="panel stat"><b>71</b><span>AIS reception gaps correctly <em>not</em> flagged as threats</span></div>
+      <div class="panel stat"><b>−70%</b><span>false spoofing alerts after fixing a timestamp trap</span></div>
+    </div>
+    <p class="sub" style="margin-top:16px">Honest limits: every annotated ship in this dataset is a real AIS vessel (labels were made by matching to AIS), so there are no true dark vessels to find. That is why blind mode is scored against the labels, and why dark-vessel and spoofing behaviour is demonstrated with injected cases. All alerts are <em>candidates</em> for review, not proof.</p>
+    <p class="sub" style="margin-top:16px">That last one is the project in miniature: the feed's <code>eta</code> column says UTC+8, but an offset sweep proved positions are UTC. Trusting the obvious reading would have flagged ordinary ships as spoofers, which is exactly the kind of confident, unfounded conclusion the auditor exists to catch.</p>
+  </div>
+</section>
+
+<!-- ========================================================= QUICKSTART -->
+<section id="quickstart">
+  <div class="wrap">
+    <h2>Quick start</h2>
+    <p class="sub">You're already in the fastest way to try it: everything above runs in your browser. To run the code locally (Python 3.10+), install it and run the test suite. The tests use small synthetic fixtures, so no dataset is needed.</p>
+<pre class="qs"><span class="c"># clone, install and run the tests</span>
+git clone https://github.com/gargi-09/cat-is-judging.git
+cd cat-is-judging
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt     <span class="c"># Windows: .venv\Scripts\python</span>
+python -m pytest</pre>
+    <p class="sub" style="margin-top:14px"><b>Have the raw data?</b> The AIS and Sentinel-2 files aren't distributed with the repo. If you have them, place them under <code>applications/maritime_threat_detection/data/raw/</code> and run <code>python -m applications.maritime_threat_detection.scripts.ingest_telemetry</code> to build the database and reproduce the results above.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Everything on this page runs in your browser on simulated data, using a JavaScript port of the repository's reconciliation rules (500 m + estimate-uncertainty tolerance, 1 h interpolation, 300 m stationary hold, 30 min dead reckoning, 30 m dark-vessel size gate, 12 h going-dark rule). MIT licensed · <a href="https://github.com/gargi-09/cat-is-judging">gargi-09/cat-is-judging</a>
+  </div>
+</footer>
+
+<script>
+"use strict";
+/* ==================================================================== DATA
+   Keep in sync with the repo. When a threat vector or SDK feature ships,
+   update its status here (and add an injector + snippet if it's demoable). */
+const MATRIX = [
+  { group: "Threat vectors" },
+  { name: "Corroborated vessel", desc: "Hull and AIS agree within 500 m plus the AIS estimate's own uncertainty", status: "shipped", phase: "1.5", module: "reconciliation.classify_detection", sandbox: true },
+  { name: "AIS spoofing / position discrepancy", desc: "The claimed identity's AIS is beyond tolerance from the hull", status: "shipped", phase: "1.5", module: "reconciliation.classify_detection", sandbox: true },
+  { name: "Dark vessel", desc: "Unidentified hull ≥ 30 m, or no AIS track matches it in blind mode", status: "shipped", phase: "1.5", module: "reconciliation", sandbox: true },
+  { name: "Small-craft filter", desc: "Unidentified hulls < 30 m aren't flagged: small craft needn't carry AIS", status: "shipped", phase: "1.5", module: "reconciliation", sandbox: true },
+  { name: "Invalid identity", desc: "MMSI breaks ITU structure: beacon, navaid, coast-station or out-of-range country code", status: "shipped", phase: "1.5", module: "reconciliation.validate_mmsi", sandbox: true },
+  { name: "Unmatched identity", desc: "Plausible MMSI that never appears in the AIS feed", status: "shipped", phase: "1.5", module: "reconciliation.classify_detection", sandbox: true },
+  { name: "Ghost AIS (phantom telemetry)", desc: "AIS track inside the footprint that no hull matches", status: "shipped", phase: "1.5", module: "reconciliation.associate_tile", sandbox: true },
+  { name: "Potential going dark", desc: "≥ 12 h AIS silence while most of the fleet is still heard (Global Fishing Watch-style)", status: "shipped", phase: "1.5", module: "reconciliation.classify_detection", sandbox: true },
+  { name: "AIS reception gap", desc: "Shorter silences: reported as insufficient data, never as a threat", status: "shipped", phase: "1.5", module: "reconciliation.classify_detection", sandbox: true },
+  { name: "Dimension mismatch", desc: "Optical hull length contradicts AIS length", status: "planned", phase: 4, module: "evals (golden set)", sandbox: false },
+  { name: "Identity swap", desc: "Two hulls broadcasting each other's MMSI", status: "planned", phase: 4, module: "evals (golden set)", sandbox: false },
+  { group: "SDK capabilities" },
+  { name: "Ground-truth ETL", desc: "AIS + Sentinel-2 annotations into indexed SQLite, with lineage", status: "shipped", phase: 1, module: "scripts/ingest_telemetry", sandbox: false },
+  { name: "Sentinel-2 georeferencing", desc: "Pixel ↔ lat/lon in pure Python (UTM)", status: "shipped", phase: 1, module: "geo.py", sandbox: false },
+  { name: "AIS track estimation", desc: "Interpolation, stationary hold, dead reckoning or an explicit 'unknown', each with an uncertainty", status: "shipped", phase: "1.5", module: "db/ais_repository.position_at", sandbox: true },
+  { name: "Blind (label-free) association", desc: "Hungarian matching on position, length and heading; scored against the labels", status: "shipped", phase: "1.5", module: "reconciliation.associate_tile", sandbox: true },
+  { name: "Symbolic verifier", desc: "Deterministic rule checks on atomic claims", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
+  { name: "Self-consistency scorer", desc: "Agreement across stochastic samples", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
+  { name: "Neurosymbolic fuser", desc: "Symbolic + consistency → calibrated score", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
+  { name: "Guardrail interceptor", desc: "Block or amend outputs below threshold", status: "next", phase: 2, module: "cat_is_judging/guardrails", sandbox: "preview" },
+  { name: "Recon agent + typed tools", desc: "LLM analyst producing structured intel reports", status: "planned", phase: 3, module: "agents/, tools/", sandbox: false },
+  { name: "Golden evals + CI gate", desc: "Fails the build below 95% faithfulness", status: "planned", phase: 4, module: "evals/", sandbox: false },
+  { name: "CLI + FastAPI service", desc: "audit-tile command and /audit endpoint", status: "planned", phase: 5, module: "main.py", sandbox: false },
+];
+
+/* =========================================================== SDK LOGIC PORT
+   Mirrors applications/maritime_threat_detection/db/ais_repository.py and
+   reconciliation.py. Same thresholds, same verdicts, same order of checks. */
+const KNOT = 0.514444;
+const MAX_INTERPOLATION_GAP_S = 3600, STATIONARY_HOLD_RADIUS_M = 300, MAX_STATIONARY_HOLD_GAP_S = 12 * 3600;
+const MAX_DEAD_RECKON_AGE_S = 1800, MIN_DEAD_RECKON_SOG_KN = 1, MAX_NEAREST_FIX_AGE_S = 900;
+const INTERPOLATION_ERROR_FRACTION = 0.10, DEAD_RECKON_ERROR_FRACTION = 0.20, STATIONARY_HOLD_ERROR_M = STATIONARY_HOLD_RADIUS_M / 2;
+const MAX_GAP_BRIDGE_S = 12 * 3600, GAP_BRIDGE_ERROR_FRACTION = 0.25;
+const CORROBORATION_BASE_M = 500, MIN_DARK_VESSEL_LENGTH_M = 30;
+const GOING_DARK_MIN_GAP_S = 12 * 3600, GOING_DARK_MIN_FLEET_COVERAGE = 0.5, GOING_DARK_MIN_DISPLACEMENT_M = 1000;
+const GHOST_EDGE_INSET_M = 50, ASSOCIATION_SEARCH_BUFFER_M = 2000, LENGTH_WEIGHT = 1.0, HEADING_WEIGHT = 0.5;
+const UNASSIGNED_COST = 10, GATED_COST = 1e6;
+const THREATS = new Set(["position_discrepancy", "potential_going_dark", "dark_vessel", "invalid_identity", "unmatched_identity"]);
+
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function bracket(fixes, t) {
+  let lo = 0, hi = fixes.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (fixes[mid].t <= t) lo = mid + 1; else hi = mid; }
+  return [lo > 0 ? fixes[lo - 1] : null, lo < fixes.length ? fixes[lo] : null];
+}
+
+function positionAt(fixes, t) {
+  const [prev, next] = bracket(fixes, t);
+  const mk = (x, y, method, age, unc, f) => ({ x, y, method, age: Math.round(age), unc, sog: f.sog, course: f.cog });
+  if (prev && prev.t === t) return mk(prev.x, prev.y, "exact", 0, 0, prev);
+  if (prev && next) {
+    const gap = next.t - prev.t, seg = dist(prev, next);
+    if (gap <= MAX_INTERPOLATION_GAP_S || (gap <= MAX_STATIONARY_HOLD_GAP_S && seg <= STATIONARY_HOLD_RADIUS_M)) {
+      const w = (t - prev.t) / gap, interp = gap <= MAX_INTERPOLATION_GAP_S;
+      return mk(prev.x + w * (next.x - prev.x), prev.y + w * (next.y - prev.y), interp ? "interpolated" : "stationary_hold",
+                Math.min(t - prev.t, next.t - t), interp ? INTERPOLATION_ERROR_FRACTION * seg : STATIONARY_HOLD_ERROR_M,
+                t - prev.t <= next.t - t ? prev : next);
+    }
+  }
+  const singles = [prev, next].filter(Boolean).sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t));
+  for (const f of singles) {
+    const dt = t - f.t, adt = Math.abs(dt);           // dt < 0: reckoning backwards from a later fix
+    if (adt <= MAX_DEAD_RECKON_AGE_S && f.sog != null && f.cog != null && f.sog >= MIN_DEAD_RECKON_SOG_KN) {
+      const d = f.sog * KNOT * dt, c = f.cog * Math.PI / 180;
+      return mk(f.x + Math.sin(c) * d, f.y + Math.cos(c) * d, "dead_reckoned", adt, DEAD_RECKON_ERROR_FRACTION * f.sog * KNOT * adt, f);
+    }
+    if (adt <= MAX_NEAREST_FIX_AGE_S) return mk(f.x, f.y, "nearest", adt, (f.sog ?? MIN_DEAD_RECKON_SOG_KN) * KNOT * adt, f);
+  }
+  return null;
+}
+
+function positionAcrossGap(fixes, t) {
+  const [prev, next] = bracket(fixes, t);
+  if (!prev || !next || next.t - prev.t > MAX_GAP_BRIDGE_S || next.t === prev.t) return null;
+  const w = (t - prev.t) / (next.t - prev.t);
+  return { x: prev.x + w * (next.x - prev.x), y: prev.y + w * (next.y - prev.y), method: "gap_bridged",
+           age: Math.round(Math.min(t - prev.t, next.t - t)), unc: GAP_BRIDGE_ERROR_FRACTION * dist(prev, next), sog: null, course: null };
+}
+
+function gapAt(fixes, t) {
+  const [prev, next] = bracket(fixes, t);
+  return { prev: prev?.t ?? null, next: next?.t ?? null, gap: prev && next ? next.t - prev.t : null, disp: prev && next ? dist(prev, next) : null };
+}
+
+const tolerance = p => CORROBORATION_BASE_M + p.unc;
+
+function validateMmsi(m) {
+  const s = String(m);
+  if (s.length !== 9) return `${s.length} digits (ship MMSIs have 9)`;
+  if (s.startsWith("00")) return "coast-station prefix 00";
+  if (s.startsWith("0")) return "group-call prefix 0";
+  if (s.startsWith("111")) return "SAR-aircraft prefix 111";
+  if (["970", "972", "974"].includes(s.slice(0, 3))) return `emergency-beacon prefix ${s.slice(0, 3)} (AIS-SART / MOB / EPIRB)`;
+  if (s.startsWith("98")) return "craft-associated-with-parent prefix 98";
+  if (s.startsWith("99")) return "aid-to-navigation prefix 99";
+  if (s.startsWith("8")) return "handheld-VHF prefix 8";
+  const mid = +s.slice(0, 3);
+  if (mid < 201 || mid > 775) return `MID ${s.slice(0, 3)} outside the ship range 201-775`;
+  return null;
+}
+
+function classifyDetection(label, hull, length, t, A) {
+  if (label == null) return length < MIN_DARK_VESSEL_LENGTH_M
+    ? { cls: "small_craft", why: `unidentified hull ${Math.round(length)} m < 30 m; AIS not required` }
+    : { cls: "dark_vessel", why: `unidentified hull ${Math.round(length)} m long` };
+  const bad = validateMmsi(label);
+  if (bad) return { cls: "invalid_identity", why: bad };
+  if (!A.registry.has(label)) return { cls: "unmatched_identity", why: "never seen in this AIS feed" };
+  const p = A.pos(label, t);
+  if (!p) {
+    const g = A.gap(label, t);
+    let start, end, longGap, moved, desc;
+    if (g.gap != null) {
+      [start, end] = [g.prev, g.next]; longGap = g.gap >= GOING_DARK_MIN_GAP_S; moved = g.disp >= GOING_DARK_MIN_DISPLACEMENT_M;
+      desc = `AIS gap ${(g.gap / 3600).toFixed(1)} h`;
+    } else {
+      const edge = g.prev ?? g.next ?? t; [start, end] = [Math.min(edge, t), Math.max(edge, t)];
+      longGap = end - start >= GOING_DARK_MIN_GAP_S; moved = true; desc = `track ends ${((end - start) / 3600).toFixed(1)} h before the image`;
+    }
+    const heard = A.coverage(start, end, label);
+    if (longGap && moved && heard >= GOING_DARK_MIN_FLEET_COVERAGE)
+      return { cls: "potential_going_dark", why: `${desc} while ${Math.round(heard * 100)}% of the fleet was heard` };
+    return { cls: "ais_silent", why: `insufficient AIS (${desc}); not a threat on its own` };
+  }
+  const gap = dist(hull, p), tol = tolerance(p);
+  return { cls: gap <= tol ? "corroborated" : "position_discrepancy", pos: p, gap, tol, why: `${Math.round(gap)} m from AIS (${p.method}), tolerance ${Math.round(tol)} m` };
+}
+
+/* ---- blind association: Hungarian matching on position + length + heading ---- */
+function hungarian(cost) {
+  const n = cost.length, m = n ? cost[0].length : 0;
+  if (!n) return [];
+  const u = new Array(n + 1).fill(0), v = new Array(m + 1).fill(0), p = new Array(m + 1).fill(0), way = new Array(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    p[0] = i; let j0 = 0; const minv = new Array(m + 1).fill(Infinity), used = new Array(m + 1).fill(false);
+    do {
+      used[j0] = true; const i0 = p[j0]; let delta = Infinity, j1 = 0;
+      for (let j = 1; j <= m; j++) if (!used[j]) {
+        const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+        if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+        if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+      }
+      for (let j = 0; j <= m; j++) { if (used[j]) { u[p[j]] += delta; v[j] -= delta; } else minv[j] -= delta; }
+      j0 = j1;
+    } while (p[j0] !== 0);
+    do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0);
+  }
+  const out = new Array(n).fill(-1);
+  for (let j = 1; j <= m; j++) if (p[j]) out[p[j] - 1] = j - 1;
+  return out;
+}
+
+const axisDiff = (a, b) => { const d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); };
+
+function pairCost(h, c, aisLen) {
+  const d = dist(h, c), tol = tolerance(c);
+  let cost = (d / tol) ** 2;
+  if (aisLen) cost += LENGTH_WEIGHT * (Math.abs(h.len - aisLen) / Math.max(h.len, aisLen)) ** 2;
+  if (c.course != null) cost += HEADING_WEIGHT * (axisDiff(h.axis, c.course) / 90) ** 2;
+  return { cost: d <= tol ? cost : GATED_COST, d, tol };
+}
+
+function associate(hulls, cands, lengthOf) {
+  const details = [], matrix = hulls.map((h, i) => {
+    const row = cands.map((c, j) => { const r = pairCost(h, c, lengthOf(c.mmsi)); details[i * cands.length + j] = r; return r.cost; });
+    return row.concat(hulls.map((_, k) => k === i ? UNASSIGNED_COST : GATED_COST));
+  });
+  return hungarian(matrix).map((j, i) => j >= 0 && j < cands.length && matrix[i][j] < UNASSIGNED_COST
+    ? { mmsi: cands[j].mmsi, d: details[i * cands.length + j].d, tol: details[i * cands.length + j].tol, method: cands[j].method }
+    : { mmsi: null });
+}
+
+/* ================================================================ SIMULATION */
+const AREA = 24000;                                          // metres, square sea area
+const TILE = { x0: 7000, y0: 7000, w: 10000, h: 10000 };     // Sentinel-2 footprint (scaled up to be visible)
+const LAT0 = 25.20, LON0 = 56.40;
+const PASS_EPOCH = Date.UTC(2026, 2, 3, 6, 46, 59) / 1000;
+const START_EPOCH = Date.UTC(2026, 2, 3, 3, 30, 0) / 1000;
+const WARMUP_TO = Date.UTC(2026, 2, 3, 6, 25, 0) / 1000;
+const MIDS = [538, 636, 352, 373, 477, 563, 341, 229, 255, 431];
+const NAMES = ["AL NOOR", "OCEAN PEARL", "GULF STAR", "SEA BREEZE", "MARLIN", "DESERT ROSE", "PACIFIC DAWN", "ORIENT JADE",
+  "BLUE HERON", "SILVER WAVE", "NORTHERN SPIRIT", "CORAL BAY", "ZEPHYR", "KHALEEJ", "HORMUZ TRADER", "ATLAS", "NEPTUNE",
+  "RED SAND", "MERIDIAN", "FALCON", "IBIS", "SAPPHIRE", "TIDEWATER", "ARABIAN SKY", "LEVANTE", "MONSOON"];
+
+const inTile = (p, inset = 0) => p.x >= TILE.x0 + inset && p.x <= TILE.x0 + TILE.w - inset && p.y >= TILE.y0 + inset && p.y <= TILE.y0 + TILE.h - inset;
+const nearTile = p => p.x >= TILE.x0 - ASSOCIATION_SEARCH_BUFFER_M && p.x <= TILE.x0 + TILE.w + ASSOCIATION_SEARCH_BUFFER_M
+                   && p.y >= TILE.y0 - ASSOCIATION_SEARCH_BUFFER_M && p.y <= TILE.y0 + TILE.h + ASSOCIATION_SEARCH_BUFFER_M;
+const toLatLon = p => [LAT0 + p.y / 111320, LON0 + p.x / (111320 * Math.cos(LAT0 * Math.PI / 180))];
+const fmtLL = p => { const [a, b] = toLatLon(p); return `${a.toFixed(5)}, ${b.toFixed(5)}`; };
+const iso = t => new Date(t * 1000).toISOString().slice(0, 19) + "Z";
+const hms = t => new Date(t * 1000).toISOString().slice(11, 19) + "Z";
+const deg = rad => ((rad * 180 / Math.PI) % 360 + 360) % 360;
+
+let rng;
+function seed(s) { rng = () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const rand = (a, b) => a + rng() * (b - a);
+const pick = arr => arr[Math.floor(rng() * arr.length)];
+
+const S = { t: START_EPOCH, vessels: [], playing: true, speed: 60, lastPass: null, autoPassed: false, selected: null, used: new Set(), colorBy: "identity" };
+
+function newMmsi(prefix) {
+  let m; do { m = prefix ? prefix * 1e6 + Math.floor(rand(0, 1e6)) : pick(MIDS) * 1e6 + Math.floor(rand(0, 1e6)); } while (S.used.has(m));
+  S.used.add(m); return m;
+}
+function newName() { return pick(NAMES) + (rng() < .35 ? " " + Math.floor(rand(2, 9)) : ""); }
+
+const TRANSMITS = new Set(["normal", "spoofer", "ghost", "beacon"]);
+function spawn(kind, opts = {}) {
+  const anchored = opts.anchored ?? (kind === "normal" ? rng() < .55 : rng() < .5);
+  const where = opts.inTile ?? (anchored || rng() < .5);
+  const x = where ? rand(TILE.x0 + 900, TILE.x0 + TILE.w - 900) : rand(1500, AREA - 1500);
+  const y = where ? rand(TILE.y0 + 900, TILE.y0 + TILE.h - 900) : rand(1500, AREA - 1500);
+  const v = {
+    kind, mmsi: newMmsi(kind === "beacon" ? 970 : null), name: kind === "small" ? "(small craft)" : newName(), x, y, ax: x, ay: y, anchored,
+    hdg: rand(0, 2 * Math.PI), sog: anchored ? 0 : rand(3, 7), len: Math.round(kind === "small" ? rand(8, 25) : rand(80, 320)),
+    phase: rand(0, 2 * Math.PI), fixes: [], aisOn: TRANSMITS.has(kind), nextFix: S.t + rand(0, 60), offset: null, offAt: null,
+  };
+  if (kind === "spoofer") {
+    // Claimed position 9–14 km from the real hull, kept inside the sea area.
+    for (let i = 0; i < 40; i++) {
+      const a = rand(0, 2 * Math.PI), r = rand(9000, 14000), ox = Math.cos(a) * r, oy = Math.sin(a) * r;
+      if (x + ox > 600 && x + ox < AREA - 600 && y + oy > 600 && y + oy < AREA - 600) { v.offset = { x: ox, y: oy }; break; }
+    }
+    v.offset ??= { x: x > AREA / 2 ? -9000 : 9000, y: 0 };
+  }
+  S.vessels.push(v);
+  return v;
+}
+
+// Providers de-duplicate unchanged positions of anchored ships, which is what the SDK's
+// stationary-hold rule exists for. Spoofers, ghosts and beacons keep a normal cadence.
+function aisInterval(v) { return v.anchored && v.kind === "normal" ? rand(60, 100) * 60 : rand(45, 75); }
+// Imagery is reconciled after downlink, once the AIS archive covers the pass from both
+// sides (the SDK interpolates between fixes before *and* after the image time).
+const DOWNLINK_S = 105 * 60;
+
+function stepVessel(v, dt) {
+  if (v.anchored) {
+    v.phase += dt * 2 * Math.PI / (6 * 3600);                // slow swing around the anchor
+    v.x = v.ax + Math.cos(v.phase) * 60; v.y = v.ay + Math.sin(v.phase) * 60; v.hdg = v.phase + Math.PI / 2;
+  } else {
+    v.x += Math.sin(v.hdg) * v.sog * dt; v.y += Math.cos(v.hdg) * v.sog * dt;
+    if (v.x < 400 || v.x > AREA - 400) { v.hdg = -v.hdg; v.x = Math.min(Math.max(v.x, 400), AREA - 400); }
+    if (v.y < 400 || v.y > AREA - 400) { v.hdg = Math.PI - v.hdg; v.y = Math.min(Math.max(v.y, 400), AREA - 400); }
+  }
+  if (v.aisOn && S.t >= v.nextFix) {
+    const off = v.offset || { x: 0, y: 0 };
+    v.fixes.push({ t: S.t, x: v.x + off.x + rand(-10, 10), y: v.y + off.y + rand(-10, 10), sog: v.sog / KNOT, cog: deg(v.hdg) });
+    if (v.fixes.length > 2 && v.fixes[0].t < S.t - 14 * 3600) v.fixes.shift();
+    v.nextFix = S.t + aisInterval(v);
+  }
+}
+
+function advance(seconds) {
+  let left = seconds;
+  while (left > 0) {
+    const dt = Math.min(10, left);
+    S.t += dt; left -= dt;
+    for (const v of S.vessels) stepVessel(v, dt);
+    if (!S.autoPassed && S.t >= PASS_EPOCH) { S.autoPassed = true; satellitePass("scheduled"); }
+  }
+}
+
+function reset() {
+  seed(20260303);
+  Object.assign(S, { t: START_EPOCH, vessels: [], lastPass: null, autoPassed: false, selected: null, used: new Set() });
+  for (let i = 0; i < 9; i++) spawn("normal", { anchored: true, inTile: true });
+  for (let i = 0; i < 7; i++) spawn("normal", { anchored: false, inTile: rng() < .5 });
+  for (let i = 0; i < 3; i++) spawn("normal", { anchored: true, inTile: false });
+  spawn("dark", { anchored: true, inTile: true });
+  spawn("spoofer", { anchored: true, inTile: true });
+  spawn("ghost", { anchored: true, inTile: true });
+  spawn("small", { anchored: true, inTile: true });
+  advance(WARMUP_TO - START_EPOCH);
+  document.getElementById("simlog").innerHTML = "";
+  log("SIM", `Scenario loaded: ${S.vessels.length} contacts, 3 hidden threats and one small craft. Satellite pass scheduled 06:46:59Z.`);
+  renderResults(); renderSelected();
+}
+
+/* ------------------------------------------------------- reconciliation run */
+function capture() {
+  // What the satellite records at imaging time: hull positions inside the footprint.
+  return { t: S.t, hulls: S.vessels.filter(v => v.kind !== "ghost" && inTile(v)).map(v => ({ v, x: v.x, y: v.y })) };
+}
+
+function lookup() {
+  const byMmsi = new Map(S.vessels.map(v => [v.mmsi, v]));
+  const registry = new Set(S.vessels.filter(v => v.fixes.length).map(v => v.mmsi));
+  return {
+    byMmsi, registry,
+    pos: (m, t) => { const p = positionAt(byMmsi.get(m).fixes, t); return p && { mmsi: m, ...p }; },
+    gap: (m, t) => gapAt(byMmsi.get(m).fixes, t),
+    bridge: (m, t) => { const b = positionAcrossGap(byMmsi.get(m).fixes, t); return b && { mmsi: m, ...b }; },
+    coverage: (a, b, ex) => {
+      let n = 0, heard = 0;
+      for (const v of S.vessels) { if (!v.fixes.length || v.mmsi === ex) continue; n++; if (v.fixes.some(f => f.t >= a && f.t <= b)) heard++; }
+      return n ? heard / n : 0;
+    },
+    length: m => byMmsi.get(m)?.len,
+  };
+}
+
+const labelOf = v => (v.kind === "dark" || v.kind === "small") ? null : v.mmsi;  // what an annotator could read off the hull
+
+function reconcile(snap) {
+  const t = snap.t, A = lookup();
+  // Identity verification: each hull's label is the claim under test.
+  const detections = snap.hulls.map(h => {
+    const label = labelOf(h.v);
+    return { v: h.v, hull: h, label, ...classifyDetection(label, h, h.v.len, t, A) };
+  });
+  const annotated = new Set(detections.map(d => d.label).filter(m => m != null));
+  const ghosts = [];
+  for (const m of A.registry) { const p = A.pos(m, t); if (p && inTile(p, GHOST_EDGE_INSET_M) && !annotated.has(m)) ghosts.push({ v: A.byMmsi.get(m), pos: p }); }
+
+  // Blind association: labels are never read; they're only used afterwards to score it.
+  const cands = [...A.registry].map(m => A.pos(m, t)).filter(p => p && nearTile(p));
+  const hulls = snap.hulls.map(h => ({ x: h.x, y: h.y, len: h.v.len, axis: deg(h.v.hdg) % 180 }));
+  const matches = associate(hulls, cands, A.length);
+  const taken = new Set(matches.map(a => a.mmsi).filter(m => m != null));
+  const blindGhosts = cands.filter(c => !taken.has(c.mmsi) && inTile(c, GHOST_EDGE_INSET_M)).map(c => ({ v: A.byMmsi.get(c.mmsi), pos: c }));
+  const placed = new Set(cands.map(c => c.mmsi));
+  const bridges = [...A.registry].filter(m => !placed.has(m)).map(m => A.bridge(m, t)).filter(Boolean);
+  detections.forEach((d, i) => {
+    const a = matches[i], h = hulls[i];
+    if (a.mmsi != null) d.blind = { status: "matched", mmsi: a.mmsi, d: a.d, tol: a.tol, ok: a.mmsi === d.label };
+    else if (bridges.some(b => dist(h, b) <= tolerance(b))) d.blind = { status: "unresolved_gap" };
+    else d.blind = { status: h.len >= MIN_DARK_VESSEL_LENGTH_M ? "dark_vessel" : "small_craft" };
+  });
+  return { t, snap, detections, ghosts, blindGhosts, registrySize: A.registry.size };
+}
+
+function truthOf(v) {
+  if (v.kind === "normal") return v.aisOn ? "normal ship" : "real ship, AIS off";
+  return { dark: "dark vessel", unregistered: "unregistered identity", spoofer: "spoofer", ghost: "no ship (fake AIS)",
+           small: "small craft (no AIS needed)", beacon: "hull using a beacon MMSI" }[v.kind];
+}
+
+function satellitePass(trigger = "manual") {
+  const snap = capture();
+  S.autoPassed = true;
+  log("INFO", `Sentinel-2 imaging (${trigger}) at ${hms(snap.t)}: ${snap.hulls.length} hulls in footprint. Downlinking; AIS archive catches up +${DOWNLINK_S / 60} min`);
+  advance(DOWNLINK_S);
+  const r = reconcile(snap);
+  S.lastPass = r; S.flash = performance.now();
+  log("INFO", `Identity check of pass ${hms(r.t)} against ${r.registrySize} MMSIs on AIS`);
+  for (const d of r.detections) {
+    if (d.cls === "position_discrepancy") log("ALERT", `SPOOFING candidate mmsi=${d.label}: AIS claims ${fmtLL(d.pos)}, hull seen ${(d.gap / 1000).toFixed(1)} km away`);
+    else if (d.cls === "dark_vessel") log("ALERT", `DARK VESSEL at ${fmtLL(d.hull)}: ${d.why}`);
+    else if (d.cls === "invalid_identity") log("ALERT", `INVALID IDENTITY mmsi=${d.label}: ${d.why}`);
+    else if (d.cls === "unmatched_identity") log("ALERT", `UNMATCHED IDENTITY mmsi=${d.label}: ${d.why}`);
+    else if (d.cls === "potential_going_dark") log("ALERT", `GOING DARK candidate mmsi=${d.label}: ${d.why}`);
+    else if (d.cls === "ais_silent") log("WARN", `AIS gap mmsi=${d.label}: ${d.why}`);
+    else if (d.cls === "small_craft") log("SIM", `small craft at ${fmtLL(d.hull)}: ${d.why} (not flagged)`);
+  }
+  for (const g of r.ghosts) log("ALERT", `GHOST AIS mmsi=${g.v.mmsi}: transponder reports ${fmtLL(g.pos)}, satellite sees no hull`);
+  const b = {}; r.detections.forEach(d => b[d.blind.status] = (b[d.blind.status] || 0) + 1);
+  const right = r.detections.filter(d => d.blind.status === "matched" && d.blind.ok).length;
+  log("OK", `Blind association (labels ignored): ${Object.entries(b).map(([k, n]) => `${k}=${n}`).join(" ")} ghost_ais=${r.blindGhosts.length} · ${right}/${b.matched || 0} matches agree with labels`);
+  renderResults();
+  return r;
+}
+
+function inject(kind) {
+  if (kind === "reset") { reset(); return; }
+  if (kind === "gone_dark") {
+    const cand = S.vessels.filter(v => v.kind === "normal" && v.aisOn && inTile(v));
+    if (!cand.length) { log("SIM", "No transmitting ship inside the footprint to switch off."); return; }
+    const v = cand.find(c => !c.anchored) || cand[0];
+    v.aisOn = false; v.offAt = S.t;
+    log("SIM", `mmsi=${v.mmsi} (${v.name}) stopped transmitting at ${hms(S.t)}. For 30 min the SDK dead-reckons it, then reports an AIS gap (not a threat). After 12 h of silence while the fleet is still heard, it becomes a going-dark candidate. Try 900× speed.`);
+    select(v); return;
+  }
+  const v = spawn(kind, { inTile: true, anchored: true });   // stays in the footprint until the next pass
+  v.nextFix = S.t;                                         // transmit on the next tick
+  const what = {
+    dark: () => `dark vessel (${v.len} m, no transponder)`, unregistered: () => `hull labelled mmsi=${v.mmsi}, never on AIS`,
+    spoofer: () => `spoofer mmsi=${v.mmsi} broadcasting ${(Math.hypot(v.offset.x, v.offset.y) / 1000).toFixed(1)} km from its hull`,
+    ghost: () => `ghost AIS mmsi=${v.mmsi} (no ship behind it)`, small: () => `small craft (${v.len} m, no AIS): should NOT be flagged`,
+    beacon: () => `hull broadcasting beacon MMSI ${v.mmsi}`,
+  }[kind]();
+  log("SIM", `Injected ${what}. Trigger a satellite pass to see how it's classified.`);
+  select(v);
+}
+
+/* =================================================================== RENDER */
+const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const CLS_VAR = { corroborated: "--ok", matched: "--ok", position_discrepancy: "--bad", potential_going_dark: "--bad",
+                  ais_silent: "--warn", unresolved_gap: "--warn", dark_vessel: "--ghost", invalid_identity: "--ghost",
+                  unmatched_identity: "--ghost", small_craft: "--info" };
+
+function sizeCanvas() {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.width * d);
+}
+const sc = () => canvas.width / AREA;
+const px = p => [p.x * sc(), canvas.height - p.y * sc()];
+
+function draw() {
+  const W = canvas.width, s = sc(), d = window.devicePixelRatio || 1;
+  ctx.fillStyle = css("--sea"); ctx.fillRect(0, 0, W, W);
+  ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.lineWidth = 1;
+  for (let g = 0; g <= AREA; g += 2000) { ctx.beginPath(); ctx.moveTo(g * s, 0); ctx.lineTo(g * s, W); ctx.moveTo(0, g * s); ctx.lineTo(W, g * s); ctx.stroke(); }
+  // Satellite footprint
+  const [tx, ty] = px({ x: TILE.x0, y: TILE.y0 + TILE.h });
+  const flash = S.flash ? Math.max(0, 1 - (performance.now() - S.flash) / 1200) : 0;
+  ctx.fillStyle = `rgba(120,160,255,${0.05 + flash * 0.25})`; ctx.fillRect(tx, ty, TILE.w * s, TILE.h * s);
+  ctx.setLineDash([6 * d, 5 * d]); ctx.strokeStyle = "rgba(160,190,255,.6)"; ctx.lineWidth = 1.5 * d;
+  ctx.strokeRect(tx, ty, TILE.w * s, TILE.h * s); ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(180,200,255,.8)"; ctx.font = `${11 * d}px system-ui`; ctx.fillText("Sentinel-2 footprint", tx + 6 * d, ty + 15 * d);
+
+  const show = id => document.getElementById(id).checked;
+  const passCls = new Map(), ghostSet = new Set(), blind = S.colorBy === "blind";
+  if (S.lastPass) {
+    for (const dd of S.lastPass.detections) passCls.set(dd.v, blind ? dd.blind.status : dd.cls);
+    for (const g of blind ? S.lastPass.blindGhosts : S.lastPass.ghosts) ghostSet.add(g.v);
+  }
+
+  // Ground-truth link: spoofer hull → claimed position
+  if (show("lyr-truth")) for (const v of S.vessels) if (v.kind === "spoofer" && v.fixes.length) {
+    const f = v.fixes[v.fixes.length - 1], [a, b] = px(v), [c, e] = px(f);
+    ctx.setLineDash([3 * d, 4 * d]); ctx.strokeStyle = css("--bad"); ctx.lineWidth = 1.2 * d;
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, e); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // AIS reports
+  if (show("lyr-ais")) for (const v of S.vessels) {
+    if (!v.fixes.length) continue;
+    const recent = v.fixes.filter(f => f.t > S.t - 3600);
+    ctx.strokeStyle = "rgba(103,176,238,.35)"; ctx.lineWidth = 1 * d; ctx.beginPath();
+    recent.forEach((f, i) => { const [a, b] = px(f); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.stroke();
+    const last = v.fixes[v.fixes.length - 1], [a, b] = px(last), stale = S.t - last.t > MAX_NEAREST_FIX_AGE_S && !v.anchored;
+    ctx.fillStyle = ghostSet.has(v) ? css("--ghost") : css("--info"); ctx.globalAlpha = stale ? .4 : 1;
+    ctx.beginPath(); ctx.arc(a, b, 3.2 * d, 0, 2 * Math.PI); ctx.fill(); ctx.globalAlpha = 1;
+    if (ghostSet.has(v)) { ctx.strokeStyle = css("--ghost"); ctx.lineWidth = 2 * d; ctx.beginPath(); ctx.arc(a, b, 9 * d, 0, 2 * Math.PI); ctx.stroke(); }
+    if (S.selected === v) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 * d; ctx.beginPath(); ctx.arc(a, b, 7 * d, 0, 2 * Math.PI); ctx.stroke(); }
+  }
+  // Physical hulls
+  if (show("lyr-hulls")) for (const v of S.vessels) {
+    if (v.kind === "ghost") continue;
+    const [a, b] = px(v), L = Math.max(v.len * s, (v.kind === "small" ? 5 : 9) * d), B = Math.max(L * .22, 3 * d);
+    ctx.save(); ctx.translate(a, b); ctx.rotate(v.hdg);
+    ctx.fillStyle = css("--hull"); ctx.beginPath();
+    ctx.moveTo(0, -L / 2); ctx.lineTo(B / 2, -L / 4); ctx.lineTo(B / 2, L / 2); ctx.lineTo(-B / 2, L / 2); ctx.lineTo(-B / 2, -L / 4); ctx.closePath(); ctx.fill();
+    const cls = passCls.get(v);
+    if (cls) { ctx.strokeStyle = css(CLS_VAR[cls] || "--info"); ctx.lineWidth = 2.2 * d; ctx.strokeRect(-B / 2 - 4 * d, -L / 2 - 4 * d, B + 8 * d, L + 8 * d); }
+    if (S.selected === v) { ctx.strokeStyle = "#fff"; ctx.setLineDash([3 * d, 3 * d]); ctx.lineWidth = 1.2 * d; ctx.strokeRect(-B / 2 - 7 * d, -L / 2 - 7 * d, B + 14 * d, L + 14 * d); ctx.setLineDash([]); }
+    ctx.restore();
+  }
+  document.getElementById("clock").textContent = `${iso(S.t).replace("T", " ")}`;
+}
+
+function log(level, msg) {
+  const box = document.getElementById("simlog"), el = document.createElement("div");
+  el.innerHTML = `<span class="lv-SIM">${hms(S.t)}</span> <span class="lv-${level}">${level.padEnd(5)}</span> ${esc(msg)}`;
+  box.appendChild(el); while (box.children.length > 200) box.firstChild.remove();
+  box.scrollTop = box.scrollHeight;
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tag = c => `<span class="tag t-${c}">${c}</span>`;
+
+function renderResults() {
+  const host = document.getElementById("results"), r = S.lastPass;
+  if (!r) { host.innerHTML = `<div class="empty">No satellite pass yet. The first pass fires automatically at 06:46:59 UTC (sim time), or press “Trigger satellite pass”.</div>`; return; }
+  const blindCell = b => b.status === "matched" ? `${tag("matched")} <span class="num">${b.mmsi}</span> ${b.ok ? "✓" : "✗ label differs"}` : tag(b.status);
+  const rows = r.detections.map(d => `<tr><td class="num">${d.label ?? "—"}</td><td>${esc(d.v.name)}</td><td>${truthOf(d.v)}</td>
+      <td>${tag(d.cls)}${THREATS.has(d.cls) ? " ⚠" : ""}</td><td>${blindCell(d.blind)}</td>
+      <td class="num">${d.gap != null ? `${Math.round(d.gap).toLocaleString()} / ${Math.round(d.tol).toLocaleString()} m` : "—"}</td>
+      <td class="num">${d.pos ? d.pos.method : "—"}</td></tr>`)
+    .concat(r.ghosts.map(g => `<tr><td class="num">${g.v.mmsi}</td><td>${esc(g.v.name)}</td><td>${truthOf(g.v)}</td>
+      <td>${tag("ghost_ais")} ⚠</td><td>${r.blindGhosts.some(b => b.v === g.v) ? tag("ghost_ais") : "—"}</td><td class="num">—</td><td class="num">${g.pos.method}</td></tr>`));
+  host.innerHTML = `<table><thead><tr><th>Label</th><th>Name</th><th>Ground truth</th><th>Identity check</th><th>Blind match (labels ignored)</th><th>Gap / tolerance</th><th>AIS estimate</th></tr></thead>
+    <tbody>${rows.join("")}</tbody></table><div class="empty" style="padding:10px 12px">Pass at ${iso(r.t)} · ⚠ = threat candidate · compare “Ground truth” with both verdict columns.</div>`;
+}
+
+function select(v) { S.selected = v; renderSelected(); }
+function renderSelected() {
+  const host = document.getElementById("selected"), v = S.selected;
+  if (!v) { host.innerHTML = `<h3>Selected</h3><div class="empty" style="padding:0">Click a hull or an AIS point on the map.</div>`; return; }
+  const last = v.fixes[v.fixes.length - 1], p = positionAt(v.fixes, S.t);
+  host.innerHTML = `<h3>Selected</h3><dl>
+    <dt>MMSI</dt><dd>${labelOf(v) == null ? "— (no transponder)" : v.mmsi}</dd><dt>Name</dt><dd>${esc(v.name)}</dd>
+    <dt>Ground truth</dt><dd>${truthOf(v)}</dd><dt>State</dt><dd>${v.kind === "ghost" ? "no physical hull" : v.anchored ? `at anchor · ${v.len} m` : `underway ${(v.sog / KNOT).toFixed(1)} kn · ${v.len} m`}</dd>
+    <dt>AIS fixes</dt><dd>${v.fixes.length}${last ? ` · last ${Math.round(S.t - last.t)} s ago` : ""}</dd>
+    <dt>position_at(now)</dt><dd>${p ? `${p.method}, fix ${p.age} s away, ±${Math.round(p.unc)} m` : v.fixes.length ? "None: AIS can't place it" : "None: never on AIS"}</dd></dl>`;
+}
+
+canvas.addEventListener("click", e => {
+  const r = canvas.getBoundingClientRect(), d = canvas.width / r.width;
+  const mx = (e.clientX - r.left) * d, my = (e.clientY - r.top) * d;
+  let best = null, bd = 16 * (window.devicePixelRatio || 1);
+  for (const v of S.vessels) {
+    const pts = [];
+    if (v.kind !== "ghost") pts.push(v);
+    if (v.fixes.length) pts.push(v.fixes[v.fixes.length - 1]);
+    for (const p of pts) { const [a, b] = px(p), dd = Math.hypot(a - mx, b - my); if (dd < bd) { bd = dd; best = v; } }
+  }
+  select(best);
+});
+
+/* ================================================================== SANDBOX */
+// Snippets reuse the last pass while its AIS archive is still in memory (the sim keeps 14 h).
+const currentPass = () => S.lastPass && S.t - S.lastPass.t < 6 * 3600 ? S.lastPass : satellitePass("sandbox");
+
+const SNIPPETS = [
+  {
+    id: "reconcile", title: "Verify claimed identities", tag: ["shipped", "Phase 1.5 · shipped"],
+    desc: "Treats each hull's label as a claim and checks it against AIS: size gate, MMSI validity, registry, position within an uncertainty-aware tolerance, and gap analysis. Same function the ETL runs on the real data.",
+    code: `<span class="k">from</span> applications.maritime_threat_detection.db <span class="k">import</span> connect
+<span class="k">from</span> applications.maritime_threat_detection.reconciliation <span class="k">import</span> AISLookup, classify_detection
+
+<span class="k">with</span> <span class="f">connect</span>(read_only=<span class="n">True</span>) <span class="k">as</span> conn:
+    ais = <span class="f">AISLookup</span>(conn)
+    <span class="k">for</span> det <span class="k">in</span> detections_in_tile:          <span class="c"># hulls the satellite saw</span>
+        v = <span class="f">classify_detection</span>(det.mmsi, det.center_lat, det.center_lon,
+                               det.length_m, epoch=pass_time, ais=ais)
+        log.<span class="f">info</span>(<span class="s">"%s mmsi=%s %s"</span>, v.verdict, det.mmsi, v.reason)`,
+    run: function* () {
+      const r = currentPass();
+      yield ["INFO", `AISLookup: ${r.registrySize} MMSIs · pass_time=${iso(r.t)} · ${r.detections.length} hulls`];
+      for (const d of r.detections) {
+        const lvl = d.cls === "corroborated" ? "OK" : THREATS.has(d.cls) ? "ALERT" : "WARN";
+        yield [lvl, `${d.cls.padEnd(21)} mmsi=${String(d.label ?? "None").padEnd(9)} ${d.why}`];
+      }
+      for (const g of r.ghosts) yield ["ALERT", `ghost_ais             mmsi=${g.v.mmsi} AIS inside footprint, no hull claims it`];
+      const c = {}; r.detections.forEach(d => c[d.cls] = (c[d.cls] || 0) + 1);
+      yield ["OK", `done · ${Object.entries(c).map(([k, n]) => `${k}=${n}`).join(" ")} ghost_ais=${r.ghosts.length}`];
+    },
+  },
+  {
+    id: "blind", title: "Blind association", tag: ["shipped", "Phase 1.5 · shipped"],
+    desc: "What a real product does: the satellite gives unlabelled hulls, and the SDK works out which AIS track belongs to which, by optimal one-to-one matching on position, length and heading. Labels are only used afterwards, to score it. Note that a spoofer's hull goes unmatched (its AIS is elsewhere): blind mode sees it as a dark vessel plus a ghost signal.",
+    code: `<span class="k">from</span> applications.maritime_threat_detection.reconciliation <span class="k">import</span> AISLookup, associate_tile
+
+ais = <span class="f">AISLookup</span>(conn)
+results, ghosts = <span class="f">associate_tile</span>(tile, detections, ais)   <span class="c"># labels never read</span>
+
+<span class="k">for</span> r <span class="k">in</span> results:
+    <span class="c"># matched        -> r.assignment.mmsi, distance, tolerance</span>
+    <span class="c"># unresolved_gap -> another ship's AIS gap could explain it: review, don't alarm</span>
+    <span class="c"># dark_vessel    -> no AIS track fits a hull >= 30 m</span>
+    log.<span class="f">info</span>(<span class="s">"%s %s"</span>, r.status, r.assignment.mmsi)`,
+    run: function* () {
+      const r = currentPass();
+      yield ["INFO", `associate_tile · ${r.detections.length} hulls · Hungarian assignment · gate = 500 m + estimate uncertainty`];
+      let right = 0, matched = 0;
+      for (const d of r.detections) {
+        const b = d.blind;
+        if (b.status === "matched") { matched++; if (b.ok) right++;
+          yield [b.ok ? "OK" : "WARN", `matched        hull@${fmtLL(d.hull)} → mmsi=${b.mmsi} (${Math.round(b.d)} m / tol ${Math.round(b.tol)} m)${b.ok ? "" : `  label says ${d.label ?? "None"}`}`]; }
+        else yield [b.status === "dark_vessel" ? "ALERT" : "WARN", `${b.status.padEnd(14)} hull@${fmtLL(d.hull)} ${d.v.len} m  (truth: ${truthOf(d.v)})`];
+      }
+      for (const g of r.blindGhosts) yield ["ALERT", `ghost_ais      mmsi=${g.v.mmsi} no hull matched this AIS track  (truth: ${truthOf(g.v)})`];
+      yield ["OK", `scored against labels: ${right}/${matched} matches correct · real data: 99.5% precision, 97.5% recall, 0.4% false dark`];
+    },
+  },
+  {
+    id: "position", title: "Where was this ship at time T?", tag: ["shipped", "Phase 1.5 · shipped"],
+    desc: "Estimates each ship's AIS position at the pass time, with an uncertainty, and refuses to guess when AIS can't tell. Select a ship on the map to focus on it.",
+    code: `<span class="k">from</span> applications.maritime_threat_detection.db.ais_repository <span class="k">import</span> position_at
+
+pos = <span class="f">position_at</span>(conn, mmsi, epoch=pass_time)
+
+<span class="c"># exact            a fix at exactly t</span>
+<span class="c"># interpolated     fixes ≤ 1 h apart either side of t</span>
+<span class="c"># stationary_hold  long gap, but both fixes within 300 m (at anchor)</span>
+<span class="c"># dead_reckoned    one fix ≤ 30 min away, projected along speed + course</span>
+<span class="c"># nearest          one fix ≤ 15 min away on a (near-)stationary ship</span>
+<span class="c"># None             AIS can't place it: say so, never invent a track</span>
+<span class="c"># pos.uncertainty_m widens the 500 m matching tolerance</span>`,
+    run: function* () {
+      const t = currentPass().t;
+      const list = S.selected && S.selected.fixes.length ? [S.selected]
+        : S.vessels.filter(v => v.fixes.length && (inTile(v) || inTile(v.fixes[v.fixes.length - 1]))).slice(0, 10);
+      yield ["INFO", `position_at(epoch=${iso(t)}) for ${list.length} vessel(s)${S.selected ? " (selected)" : " near the footprint"}`];
+      for (const v of list) {
+        const p = positionAt(v.fixes, t);
+        yield p ? ["OK", `mmsi=${v.mmsi} → TrackPosition(method='${p.method}', lat/lon=${fmtLL(p)}, fix_age_s=${p.age}, uncertainty_m=${Math.round(p.unc)})`]
+                : ["WARN", `mmsi=${v.mmsi} → None  # AIS can't place it at this time`];
+      }
+    },
+  },
+  {
+    id: "audit", title: "Faithfulness audit", tag: ["preview", "Phase 2 · preview"],
+    desc: "Preview of the core SDK (API subject to change). A simulated recon agent trusts AIS and writes an intel report; the auditor checks each claim symbolically against the satellite, scores consistency over 5 samples, fuses both, and blocks the report if a critical rule fails.",
+    code: `<span class="k">from</span> cat_is_judging <span class="k">import</span> FaithfulnessAuditor   <span class="c"># Phase 2: preview API</span>
+
+auditor = <span class="f">FaithfulnessAuditor</span>(
+    rules=maritime_rules,          <span class="c"># deterministic checks vs ground truth</span>
+    samples=<span class="n">5</span>,                     <span class="c"># self-consistency sampling</span>
+    threshold=<span class="n">0.95</span>,
+)
+result = auditor.<span class="f">audit</span>(claims=agent_report.claims, ground_truth=conn)
+
+<span class="k">if not</span> result.verdict:
+    <span class="k">raise</span> <span class="f">FaithfulnessViolation</span>(result.hallucinations)`,
+    run: function* () {
+      const r = currentPass();
+      const claims = [];
+      // The simulated agent trusts AIS: it reports every AIS ship in the footprint as present where AIS says.
+      const aisShips = S.vessels.filter(v => { const p = positionAt(v.fixes, r.t); return p && inTile(p); });
+      const flagged = r.detections.filter(d => d.cls !== "small_craft").length;
+      claims.push({ text: `${aisShips.length} vessels present in tile`, ok: aisShips.length === flagged, critical: false });
+      claims.push({ text: "No dark or unidentified vessels in tile", ok: !r.detections.some(d => ["dark_vessel", "invalid_identity", "unmatched_identity"].includes(d.cls)), critical: true });
+      for (const d of r.detections.filter(d => d.cls === "position_discrepancy"))
+        claims.push({ text: `mmsi=${d.label} at ${fmtLL(d.pos)} (per AIS)`, ok: false, critical: true, why: `hull observed ${(d.gap / 1000).toFixed(1)} km away` });
+      for (const g of r.ghosts)
+        claims.push({ text: `mmsi=${g.v.mmsi} present at ${fmtLL(g.pos)}`, ok: false, critical: true, why: "no hull in imagery" });
+      const sample = r.detections.find(d => d.cls === "corroborated");
+      if (sample) claims.push({ text: `mmsi=${sample.label} corroborated`, ok: true, critical: false });
+
+      yield ["INFO", `agent report: ${claims.length} atomic claims extracted · pass_time=${iso(r.t)}`];
+      let total = 0, failedCritical = 0;
+      for (const c of claims) {
+        const sym = c.ok ? 1 : 0, cons = c.ok ? 0.88 + rng() * 0.12 : 0.45 + rng() * 0.3, score = 0.7 * sym + 0.3 * cons;
+        total += score; if (!c.ok && c.critical) failedCritical++;
+        yield [c.ok ? "OK" : "ALERT", `${c.ok ? "VERIFIED " : "HALLUCINATION"} "${c.text}"  symbolic=${sym} consistency=${cons.toFixed(2)} fused=${score.toFixed(2)}${c.why ? `  · ${c.why}` : ""}`];
+      }
+      const f = total / claims.length;
+      yield ["INFO", `faithfulness=${f.toFixed(3)} threshold=0.95 critical_failures=${failedCritical}`];
+      yield failedCritical || f < .95
+        ? ["ALERT", `FaithfulnessViolation: report blocked. ${failedCritical} critical claim(s) contradict ground truth.`]
+        : ["OK", "verdict=PASS · report released"];
+      yield ["SIM", "[preview] simulated scores; the Phase 2 SDK replaces this with the real verifier and sampler"];
+    },
+  },
+];
+
+let activeSnippet = 0;
+function renderTabs() {
+  document.getElementById("tabs").innerHTML = SNIPPETS.map((s, i) =>
+    `<button class="btn small" role="tab" aria-selected="${i === activeSnippet}" data-i="${i}">${esc(s.title)}</button>`).join("");
+  const s = SNIPPETS[activeSnippet];
+  document.getElementById("snippet").innerHTML = `<pre class="code">${s.code}</pre>
+    <div class="runpane"><div class="runbar"><span class="meta"><span class="tag t-${s.tag[0]}">${s.tag[1]}</span></span>
+      <button class="btn small" id="exec">Execute SDK Sandbox</button></div>
+      <div class="log" id="execlog"><div class="lv-SIM">$ press “Execute SDK Sandbox”: runs against the simulator's current state</div></div></div>
+    <div class="snipdesc">${esc(s.desc)}</div>`;
+  document.getElementById("exec").onclick = execute;
+}
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-i]"); if (!b) return; activeSnippet = +b.dataset.i; renderTabs();
+});
+
+async function execute() {
+  const btn = document.getElementById("exec"), out = document.getElementById("execlog");
+  btn.disabled = true; out.innerHTML = `<div class="lv-SIM">$ python sandbox.py  # last satellite pass ${S.lastPass ? iso(S.lastPass.t) : "none yet: imaging now"}</div>`;
+  for (const [lvl, msg] of SNIPPETS[activeSnippet].run()) {
+    await new Promise(r => setTimeout(r, 90));
+    const el = document.createElement("div");
+    el.innerHTML = `<span class="lv-${lvl}">${lvl.padEnd(5)}</span> ${esc(msg)}`;
+    out.appendChild(el); out.scrollTop = out.scrollHeight;
+  }
+  btn.disabled = false;
+}
+
+/* =================================================================== MATRIX */
+function renderMatrix() {
+  const st = { shipped: "Shipped", next: "Next", planned: "Planned" };
+  const rows = MATRIX.map(m => m.group
+    ? `<tr><th colspan="5" style="background:var(--surface)">${esc(m.group)}</th></tr>`
+    : `<tr><td><b>${esc(m.name)}</b><br><span class="sub" style="font-size:.82rem">${esc(m.desc)}</span></td>
+         <td><span class="tag t-${m.status}">${st[m.status]}</span></td><td class="num">P${m.phase}</td>
+         <td class="num" style="font-size:.76rem">${esc(m.module)}</td>
+         <td>${m.sandbox === true ? '<span class="tag t-shipped">Try it</span>' : m.sandbox === "preview" ? '<span class="tag t-preview">Preview</span>' : '<span class="sub">—</span>'}</td></tr>`);
+  document.getElementById("matrix-table").innerHTML =
+    `<table><thead><tr><th>Capability</th><th>Status</th><th>Phase</th><th>Module</th><th>In sandbox</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+
+/* ===================================================================== WIRE */
+document.querySelectorAll("[data-inject]").forEach(b => b.addEventListener("click", () => inject(b.dataset.inject)));
+document.getElementById("pass").onclick = () => satellitePass("manual");
+const playBtn = document.getElementById("play");
+playBtn.onclick = () => { S.playing = !S.playing; playBtn.textContent = S.playing ? "Pause" : "Play"; playBtn.setAttribute("aria-pressed", S.playing); };
+document.getElementById("speed").onchange = e => S.speed = +e.target.value;
+document.getElementById("colorby").onchange = e => S.colorBy = e.target.value;
+try { const t = localStorage.getItem("cij-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+document.getElementById("theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+  try { localStorage.setItem("cij-theme", document.documentElement.dataset.theme); } catch {}
+};
+if (matchMedia("(prefers-reduced-motion: reduce)").matches) { S.speed = 10; document.getElementById("speed").value = "10"; }
+
+let lastFrame = performance.now(), selTick = 0;
+function frame(now) {
+  const dt = Math.min(0.25, (now - lastFrame) / 1000); lastFrame = now;
+  if (S.playing) advance(dt * S.speed);
+  draw();
+  if ((selTick += dt) > 0.5) { selTick = 0; if (S.selected) renderSelected(); }
+  requestAnimationFrame(frame);
+}
+window.addEventListener("resize", sizeCanvas);
+sizeCanvas(); reset(); renderTabs(); renderMatrix(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
