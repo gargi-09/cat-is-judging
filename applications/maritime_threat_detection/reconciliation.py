@@ -171,28 +171,36 @@ def classify_detection(
         return Verification(verdict="unmatched_identity", reason=f"MMSI {mmsi} never seen in this AIS feed")
     p = ais.position(mmsi, epoch)
     if p is None:
-        g = ais.gap(mmsi, epoch)
-        if g.gap_s is not None:
-            start, end = g.prev_epoch or epoch, g.next_epoch or epoch
-            long_gap, moved = g.gap_s >= GOING_DARK_MIN_GAP_S, (g.displacement_m or 0) >= GOING_DARK_MIN_DISPLACEMENT_M
-            desc = f"AIS gap {g.gap_s / 3600:.1f} h, moved {(g.displacement_m or 0) / 1000:.1f} km across it"
-        else:
-            edge = g.prev_epoch if g.prev_epoch is not None else g.next_epoch
-            start, end = sorted((edge if edge is not None else epoch, epoch))
-            long_gap, moved = end - start >= GOING_DARK_MIN_GAP_S, True  # track ends: movement unknowable
-            desc = f"track {'ends' if g.next_epoch is None else 'starts'} {(end - start) / 3600:.1f} h from the image"
-        heard = ais.coverage(start, end, mmsi)
-        if long_gap and moved and heard >= GOING_DARK_MIN_FLEET_COVERAGE:
-            return Verification(verdict="potential_going_dark", reason=f"{desc} while {heard:.0%} of the fleet was heard")
-        b = ais.bridge(mmsi, epoch)
-        on_route = b is not None and haversine_m(lat, lon, b.lat, b.lon) <= tolerance_m(b)
-        note = "hull lies on its AIS route: a reception gap" if on_route else "not a threat signal on its own"
-        return Verification(verdict="ais_silent", reason=f"insufficient AIS ({desc}); {note}")
+        return assess_silence(mmsi, epoch, ais, lat, lon)
     gap = haversine_m(lat, lon, p.lat, p.lon)
     tol = tolerance_m(p)
     verdict: Verdict = "corroborated" if gap <= tol else "position_discrepancy"
     return Verification(verdict=verdict, reason=f"{gap:,.0f} m from AIS ({p.method}), tolerance {tol:,.0f} m",
                         ais=p, gap_m=gap, tolerance_m=tol)
+
+
+def assess_silence(mmsi: int, epoch: int, ais: AISLookup, lat: float | None = None, lon: float | None = None) -> Verification:
+    """Why AIS can't place a registered ship at ``epoch``: going dark, or just a gap.
+
+    With a hull position, also says whether the hull sits on the ship's AIS route.
+    """
+    g = ais.gap(mmsi, epoch)
+    if g.gap_s is not None:
+        start, end = g.prev_epoch or epoch, g.next_epoch or epoch
+        long_gap, moved = g.gap_s >= GOING_DARK_MIN_GAP_S, (g.displacement_m or 0) >= GOING_DARK_MIN_DISPLACEMENT_M
+        desc = f"AIS gap {g.gap_s / 3600:.1f} h, moved {(g.displacement_m or 0) / 1000:.1f} km across it"
+    else:
+        edge = g.prev_epoch if g.prev_epoch is not None else g.next_epoch
+        start, end = sorted((edge if edge is not None else epoch, epoch))
+        long_gap, moved = end - start >= GOING_DARK_MIN_GAP_S, True  # track ends: movement unknowable
+        desc = f"track {'ends' if g.next_epoch is None else 'starts'} {(end - start) / 3600:.1f} h from the image"
+    heard = ais.coverage(start, end, mmsi)
+    if long_gap and moved and heard >= GOING_DARK_MIN_FLEET_COVERAGE:
+        return Verification(verdict="potential_going_dark", reason=f"{desc} while {heard:.0%} of the fleet was heard")
+    b = ais.bridge(mmsi, epoch)
+    on_route = b is not None and lat is not None and lon is not None and haversine_m(lat, lon, b.lat, b.lon) <= tolerance_m(b)
+    note = "hull lies on its AIS route: a reception gap" if on_route else "not a threat signal on its own"
+    return Verification(verdict="ais_silent", reason=f"insufficient AIS ({desc}); {note}")
 
 
 # ----------------------------------------------------------------- association -----

@@ -3,8 +3,8 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen?logo=pytest&logoColor=white)](tests/)
-[![Status](https://img.shields.io/badge/status-phase%201.5%20of%205-orange)](#roadmap)
+[![Tests](https://img.shields.io/badge/tests-71%20passing-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![Status](https://img.shields.io/badge/status-phase%202%20of%205-orange)](#roadmap)
 [![Interactive Sandbox](https://img.shields.io/badge/interactive-sandbox-7c3aed?logo=githubpages&logoColor=white)](https://gargi-09.github.io/cat-is-judging/)
 
 Neurosymbolic faithfulness auditing for RAG systems: catches hallucinated answers by combining symbolic verification against ground truth with self-consistency scoring.
@@ -16,10 +16,10 @@ The library (`cat_is_judging/`) is domain-agnostic. It is showcased through a pr
 **[Open the interactive sandbox →](https://gargi-09.github.io/cat-is-judging/)** No install needed.
 
 - **AIS telemetry simulator:** inject a dark vessel, AIS spoofer, ghost signal, misused beacon MMSI, small craft or a transponder going silent, then trigger a satellite pass and watch each hull get classified, both by identity check and by blind (label-free) matching.
-- **SDK sandbox:** real SDK code, with an *Execute SDK Sandbox* button that streams the detection log against the live simulation.
+- **SDK sandbox:** real SDK code, with an *Execute SDK Sandbox* button that streams the detection log against the live simulation, including the faithfulness audit and guardrail.
 - **Feature support matrix:** what ships today and what's next.
 
-The sandbox runs on simulated data, using a JavaScript port of the repo's reconciliation rules. The source is [`docs/index.html`](docs/index.html).
+The sandbox runs on simulated data, using a JavaScript port of the repo's reconciliation rules and auditor core. The source is [`docs/index.html`](docs/index.html).
 
 ## Roadmap
 
@@ -27,8 +27,8 @@ The sandbox runs on simulated data, using a JavaScript port of the repo's reconc
 |---|---|---|
 | 1 | Data engineering: AIS + Sentinel-2 annotations → indexed SQLite ground truth | ![done](https://img.shields.io/badge/-done-brightgreen) |
 | 1.5 | Refined threat rules and label-free association, scored against the labels | ![done](https://img.shields.io/badge/-done-brightgreen) |
-| 2 | Core SDK: symbolic verifier, consistency scorer, fuser, guardrail interceptor | ![next](https://img.shields.io/badge/-next-blue) |
-| 3 | Recon agent and typed AIS / optical tools | ![planned](https://img.shields.io/badge/-planned-lightgrey) |
+| 2 | Core SDK: symbolic verifier, consistency scorer, fuser, guardrail interceptor | ![done](https://img.shields.io/badge/-done-brightgreen) |
+| 3 | Recon agent and typed AIS / optical tools | ![next](https://img.shields.io/badge/-next-blue) |
 | 4 | Golden eval set and CI faithfulness gate | ![planned](https://img.shields.io/badge/-planned-lightgrey) |
 | 5 | CLI / FastAPI interface and case study | ![planned](https://img.shields.io/badge/-planned-lightgrey) |
 
@@ -65,6 +65,33 @@ How the rules were set, and what they deliberately don't do:
 - **Georeferencing:** the chips carry no coordinates. They are georeferenced from the Sentinel-2 tile ID and pixel offset, and agree with AIS to within a few pixels.
 - **Timestamps:** AIS timestamps are read as UTC. This was chosen empirically; the `eta` column's `+08` offset is misleading.
 
+## The auditor (Phase 2)
+
+A report is split into atomic claims. Each claim gets a **three-valued verdict** from deterministic rules: *supported*, *contradicted* or *unverifiable* (the rule can't decide, so it doesn't guess). Separately, the generator is **re-sampled**, and each claim's consistency is the share of samples that repeat it. The two are fused into one score per claim:
+
+| Symbolic verdict | Claim score | Why |
+|---|---|---|
+| contradicted | 0 | A hallucination repeated in every sample is still a hallucination |
+| supported | 1 | A verified fact is faithful even if the generator was unsure of it |
+| unverifiable | consistency × 0.5 | Consistency is evidence of belief, not truth, so it is capped |
+
+The report score is the mean over claims. With a 0.95 pass bar, the 0.5 cap means a report passes only if at most 10% of its claims are unverified. The **guardrail** then decides:
+- **pass:** ≥ 0.95 and nothing contradicted.
+- **amend:** contradicted claims are cut, unverifiable ones are marked `[unverified]`. Hedging excuses missing evidence, never contradicting evidence.
+- **block:** a critical claim (an accusation such as spoofing or going dark) is contradicted, the score is below 0.5, or nothing verified would remain.
+
+The core (`cat_is_judging/`) knows nothing about ships. The maritime plug-in supplies five claim kinds, with **presence decided by the imagery** and **identity by AIS**. Identity is often only unverifiable: "not in my feed" isn't "unregistered", and a short AIS gap isn't going dark.
+
+On the real data, three stand-in analysts each wrote one report per tile (183 tiles, 5 samples each):
+
+| Analyst | Pass | Amend | Block |
+|---|---|---|---|
+| `imagery_first`: reports what the satellite saw, label-free identities | 137 | 46 | 0 |
+| `ais_trusting`: repeats AIS, including positions with no hull behind them | 115 | 54 | 14 |
+| `alarmist`: calls every AIS lapse "going dark" | 115 | 33 | 35 |
+
+The `imagery_first` amendments are tiles where AIS gaps leave "no dark vessels" unprovable, so that claim is hedged rather than asserted. Two `ais_trusting` blocks trace back to blind association's own 2 false dark alarms: the auditor is only as good as its rules. The analysts are placeholders until Phase 3.
+
 ## Quickstart
 
 The fastest way to see it work is the **[interactive sandbox](https://gargi-09.github.io/cat-is-judging/)**. Nothing to install.
@@ -85,8 +112,14 @@ python -m pytest
 ## Layout
 
 ```text
-cat_is_judging/                     domain-agnostic auditing core (phase 2)
+cat_is_judging/                     domain-agnostic auditing core
+  claims.py    atomic claims and reports
+  evaluators/  symbolic verifier, self-consistency, fusion
+  guardrails/  pass / amend / block
+  auditor.py   FaithfulnessAuditor
 applications/maritime_threat_detection/
+  audit.py     maritime claim kinds and rules for the auditor
+  analyst_stub.py  stand-in analysts until Phase 3
   db/          schema.sql, AIS spatiotemporal lookups
   tools/       optical annotation parsing (agent tools in phase 3)
   scripts/     ingest_telemetry.py (ETL)

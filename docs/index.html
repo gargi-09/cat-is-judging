@@ -224,7 +224,7 @@
 <section id="sandbox">
   <div class="wrap">
     <h2>SDK sandbox</h2>
-    <p class="sub">Real SDK code on the left. <b>Execute SDK Sandbox</b> runs the equivalent logic in your browser against the simulator's current state and streams the detection log. The first three snippets are shipped APIs; the last previews the Phase 2 auditor.</p>
+    <p class="sub">Real SDK code on the left. <b>Execute SDK Sandbox</b> runs the equivalent logic in your browser against the simulator's current state and streams the detection log. All snippets are shipped APIs. The faithfulness audit uses stand-in analysts until the Phase 3 analyst component lands.</p>
     <div class="tabs" role="tablist" id="tabs"></div>
     <div class="panel snippet" id="snippet"></div>
   </div>
@@ -252,6 +252,13 @@
       <div class="panel stat"><b>71</b><span>AIS reception gaps correctly <em>not</em> flagged as threats</span></div>
       <div class="panel stat"><b>−70%</b><span>false spoofing alerts after fixing a timestamp trap</span></div>
     </div>
+    <h3 style="margin-top:22px">Auditor on the same data (Phase 2)</h3>
+    <p class="sub">Each of three stand-in analysts wrote one report per tile (183 tiles), re-sampled 5 times for consistency, and the guardrail decided what would be released. The analysts are placeholders until Phase 3; the point is how the guardrail treats each failure mode.</p>
+    <div class="panel tablewrap"><table><thead><tr><th>Analyst</th><th>Pass</th><th>Amend</th><th>Block</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td>imagery_first</td><td class="num">137</td><td class="num">46</td><td class="num">0</td><td>Amended reports are tiles where AIS gaps leave “no dark vessels” unprovable: hedged, not asserted</td></tr>
+      <tr><td>ais_trusting</td><td class="num">115</td><td class="num">54</td><td class="num">14</td><td>Positions with no hull behind them are cut. 12 blocks: mostly unsupported reports. 2 blocks: “no dark vessels” where blind association has a candidate, which are its 2 known false dark alarms, so the auditor is only as good as its rules</td></tr>
+      <tr><td>alarmist</td><td class="num">115</td><td class="num">33</td><td class="num">35</td><td>Going-dark accusations on short AIS gaps are unverifiable; where AIS did place the ship, the report is blocked</td></tr>
+    </tbody></table></div>
     <p class="sub" style="margin-top:16px">Honest limits: every annotated ship in this dataset is a real AIS vessel (labels were made by matching to AIS), so there are no true dark vessels to find. That is why blind mode is scored against the labels, and why dark-vessel and spoofing behaviour is demonstrated with injected cases. All alerts are <em>candidates</em> for review, not proof.</p>
     <p class="sub" style="margin-top:16px">That last one is the project in miniature: the feed's <code>eta</code> column says UTC+8, but an offset sweep proved positions are UTC. Trusting the obvious reading would have flagged ordinary ships as spoofers, which is exactly the kind of confident, unfounded conclusion the auditor exists to catch.</p>
   </div>
@@ -274,7 +281,7 @@ python -m pytest</pre>
 
 <footer>
   <div class="wrap">
-    Everything on this page runs in your browser on simulated data, using a JavaScript port of the repository's reconciliation rules (500 m + estimate-uncertainty tolerance, 1 h interpolation, 300 m stationary hold, 30 min dead reckoning, 30 m dark-vessel size gate, 12 h going-dark rule). MIT licensed · <a href="https://github.com/gargi-09/cat-is-judging">gargi-09/cat-is-judging</a>
+    Everything on this page runs in your browser on simulated data, using a JavaScript port of the repository's reconciliation rules (500 m + estimate-uncertainty tolerance, 1 h interpolation, 300 m stationary hold, 30 min dead reckoning, 30 m dark-vessel size gate, 12 h going-dark rule) and of the auditor core (0.95 pass threshold, 0.5 cap for unverified claims, block below 0.5 or on a contradicted critical claim). MIT licensed · <a href="https://github.com/gargi-09/cat-is-judging">gargi-09/cat-is-judging</a>
   </div>
 </footer>
 
@@ -301,11 +308,12 @@ const MATRIX = [
   { name: "Sentinel-2 georeferencing", desc: "Pixel ↔ lat/lon in pure Python (UTM)", status: "shipped", phase: 1, module: "geo.py", sandbox: false },
   { name: "AIS track estimation", desc: "Interpolation, stationary hold, dead reckoning or an explicit 'unknown', each with an uncertainty", status: "shipped", phase: "1.5", module: "db/ais_repository.position_at", sandbox: true },
   { name: "Blind (label-free) association", desc: "Hungarian matching on position, length and heading; scored against the labels", status: "shipped", phase: "1.5", module: "reconciliation.associate_tile", sandbox: true },
-  { name: "Symbolic verifier", desc: "Deterministic rule checks on atomic claims", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
-  { name: "Self-consistency scorer", desc: "Agreement across stochastic samples", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
-  { name: "Neurosymbolic fuser", desc: "Symbolic + consistency → calibrated score", status: "next", phase: 2, module: "cat_is_judging/evaluators", sandbox: "preview" },
-  { name: "Guardrail interceptor", desc: "Block or amend outputs below threshold", status: "next", phase: 2, module: "cat_is_judging/guardrails", sandbox: "preview" },
-  { name: "Recon agent + typed tools", desc: "LLM analyst producing structured intel reports", status: "planned", phase: 3, module: "agents/, tools/", sandbox: false },
+  { name: "Symbolic verifier", desc: "Rules give each atomic claim a three-valued verdict: supported, contradicted or unverifiable; fails closed", status: "shipped", phase: 2, module: "cat_is_judging/evaluators/symbolic", sandbox: true },
+  { name: "Self-consistency scorer", desc: "Share of re-generated samples that repeat a claim: evidence of belief, never of truth", status: "shipped", phase: 2, module: "cat_is_judging/evaluators/consistency", sandbox: true },
+  { name: "Neurosymbolic fuser", desc: "Symbolic verdict outranks consistency; unverified claims capped at 0.5, so ≤ 10% may be unverified to pass 0.95", status: "shipped", phase: 2, module: "cat_is_judging/evaluators/fusion", sandbox: true },
+  { name: "Guardrail interceptor", desc: "Pass, amend (cut contradictions, mark [unverified]) or block (critical claim contradicted)", status: "shipped", phase: 2, module: "cat_is_judging/guardrails", sandbox: true },
+  { name: "Maritime audit rules", desc: "Presence from imagery, identity from AIS; count, dark-count, spoofing and going-dark claims", status: "shipped", phase: 2, module: "maritime_threat_detection/audit", sandbox: true },
+  { name: "Recon agent + typed tools", desc: "Analyst producing structured intel reports (replaces the stand-in analysts)", status: "next", phase: 3, module: "agents/, tools/", sandbox: false },
   { name: "Golden evals + CI gate", desc: "Fails the build below 95% faithfulness", status: "planned", phase: 4, module: "evals/", sandbox: false },
   { name: "CLI + FastAPI service", desc: "audit-tile command and /audit endpoint", status: "planned", phase: 5, module: "main.py", sandbox: false },
 ];
@@ -395,23 +403,26 @@ function classifyDetection(label, hull, length, t, A) {
   if (bad) return { cls: "invalid_identity", why: bad };
   if (!A.registry.has(label)) return { cls: "unmatched_identity", why: "never seen in this AIS feed" };
   const p = A.pos(label, t);
-  if (!p) {
-    const g = A.gap(label, t);
-    let start, end, longGap, moved, desc;
-    if (g.gap != null) {
-      [start, end] = [g.prev, g.next]; longGap = g.gap >= GOING_DARK_MIN_GAP_S; moved = g.disp >= GOING_DARK_MIN_DISPLACEMENT_M;
-      desc = `AIS gap ${(g.gap / 3600).toFixed(1)} h`;
-    } else {
-      const edge = g.prev ?? g.next ?? t; [start, end] = [Math.min(edge, t), Math.max(edge, t)];
-      longGap = end - start >= GOING_DARK_MIN_GAP_S; moved = true; desc = `track ends ${((end - start) / 3600).toFixed(1)} h before the image`;
-    }
-    const heard = A.coverage(start, end, label);
-    if (longGap && moved && heard >= GOING_DARK_MIN_FLEET_COVERAGE)
-      return { cls: "potential_going_dark", why: `${desc} while ${Math.round(heard * 100)}% of the fleet was heard` };
-    return { cls: "ais_silent", why: `insufficient AIS (${desc}); not a threat on its own` };
-  }
+  if (!p) return assessSilence(label, t, A);
   const gap = dist(hull, p), tol = tolerance(p);
   return { cls: gap <= tol ? "corroborated" : "position_discrepancy", pos: p, gap, tol, why: `${Math.round(gap)} m from AIS (${p.method}), tolerance ${Math.round(tol)} m` };
+}
+
+// Why AIS can't place a registered ship at t: going dark, or just a gap.
+function assessSilence(label, t, A) {
+  const g = A.gap(label, t);
+  let start, end, longGap, moved, desc;
+  if (g.gap != null) {
+    [start, end] = [g.prev, g.next]; longGap = g.gap >= GOING_DARK_MIN_GAP_S; moved = g.disp >= GOING_DARK_MIN_DISPLACEMENT_M;
+    desc = `AIS gap ${(g.gap / 3600).toFixed(1)} h`;
+  } else {
+    const edge = g.prev ?? g.next ?? t; [start, end] = [Math.min(edge, t), Math.max(edge, t)];
+    longGap = end - start >= GOING_DARK_MIN_GAP_S; moved = true; desc = `track ends ${((end - start) / 3600).toFixed(1)} h before the image`;
+  }
+  const heard = A.coverage(start, end, label);
+  if (longGap && moved && heard >= GOING_DARK_MIN_FLEET_COVERAGE)
+    return { cls: "potential_going_dark", why: `${desc} while ${Math.round(heard * 100)}% of the fleet was heard` };
+  return { cls: "ais_silent", why: `insufficient AIS (${desc}); not a threat on its own` };
 }
 
 /* ---- blind association: Hungarian matching on position + length + heading ---- */
@@ -458,6 +469,55 @@ function associate(hulls, cands, lengthOf) {
     : { mmsi: null });
 }
 
+/* ============================================================= AUDITOR PORT
+   Mirrors cat_is_judging/ (domain-agnostic core). Same thresholds, same rules of fusion:
+   symbolic verdicts outrank consistency; unverifiable claims are capped. */
+const PASS_THRESHOLD = 0.95, UNVERIFIED_CEILING = 0.5, BLOCK_BELOW = 0.5;
+
+function verifyClaim(claim, gt, rules) {
+  const results = [];
+  for (const r of rules.filter(r => r.kinds.includes(claim.kind))) {
+    let out;
+    try { out = r.check(claim, gt); } catch (e) { out = ["unverifiable", `rule error (${e.name}: ${e.message})`]; }  // fail closed
+    results.push({ rule: r.name, outcome: out[0], evidence: out[1] });
+  }
+  if (!results.length) return { outcome: "unverifiable", evidence: `no rule checks claims of kind '${claim.kind}'` };
+  const o = new Set(results.map(r => r.outcome));
+  return { outcome: o.has("contradicted") ? "contradicted" : o.has("supported") ? "supported" : "unverifiable",
+           evidence: results.map(r => r.evidence).join("; ") };
+}
+const consistencyOf = (claim, samples, agree) => samples.length ? samples.filter(s => s.claims.some(c => agree(claim, c))).length / samples.length : null;
+const claimScore = (outcome, cons) => outcome === "contradicted" ? 0 : outcome === "supported" ? 1 : UNVERIFIED_CEILING * (cons ?? 0);
+const describe = c => (c.hedged ? "[unverified] " : "") + c.text;
+
+function audit(report, gt, samples, rules, agree) {
+  const claims = report.claims.map(c => {
+    const v = verifyClaim(c, gt, rules), cons = consistencyOf(c, samples, agree);
+    return { claim: c, outcome: v.outcome, evidence: v.evidence, consistency: cons, score: claimScore(v.outcome, cons),
+             counted: !(c.hedged && v.outcome === "unverifiable") };
+  });
+  const counted = claims.filter(c => c.counted);
+  const score = counted.length ? counted.reduce((s, c) => s + c.score, 0) / counted.length : 1;
+  const bad = claims.filter(c => c.outcome === "contradicted");
+  return { claims, score, hallucinations: bad, critical: bad.filter(c => c.claim.critical),
+           unverified: claims.filter(c => c.outcome === "unverifiable"), supported: claims.filter(c => c.outcome === "supported"),
+           passed: score >= PASS_THRESHOLD && !bad.length, n: samples.length };
+}
+
+// Guardrail: pass / amend (cut contradictions, mark unknowns [unverified]) / block.
+function guard(report, gt, samples, rules, agree) {
+  const a = audit(report, gt, samples, rules, agree);
+  if (a.critical.length) return { action: "block", audit: a, reason: `${a.critical.length} critical claim(s) contradicted by ground truth` };
+  if (a.score < BLOCK_BELOW) return { action: "block", audit: a, reason: `score ${a.score.toFixed(3)} < ${BLOCK_BELOW}: most of the report is unsupported` };
+  if (a.passed) return { action: "pass", audit: a, released: report, reason: `score ${a.score.toFixed(3)} >= ${PASS_THRESHOLD} with no contradicted claims` };
+  const drop = new Set(a.hallucinations.map(c => c.claim.id)), hedge = new Set(a.unverified.filter(c => !c.claim.hedged).map(c => c.claim.id));
+  const amended = { id: report.id + "+amended", claims: report.claims.filter(c => !drop.has(c.id)).map(c => hedge.has(c.id) ? { ...c, hedged: true } : c) };
+  const aa = audit(amended, gt, samples, rules, agree);
+  if (!aa.supported.length) return { action: "block", audit: a, reason: "nothing verified would remain after amendment" };
+  return { action: "amend", audit: a, amended: aa, released: amended,
+           reason: `score ${a.score.toFixed(3)} < ${PASS_THRESHOLD}: removed ${drop.size} contradicted, marked ${hedge.size} unverified` };
+}
+
 /* ================================================================ SIMULATION */
 const AREA = 24000;                                          // metres, square sea area
 const TILE = { x0: 7000, y0: 7000, w: 10000, h: 10000 };     // Sentinel-2 footprint (scaled up to be visible)
@@ -485,7 +545,7 @@ function seed(s) { rng = () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.
 const rand = (a, b) => a + rng() * (b - a);
 const pick = arr => arr[Math.floor(rng() * arr.length)];
 
-const S = { t: START_EPOCH, vessels: [], playing: true, speed: 60, lastPass: null, autoPassed: false, selected: null, used: new Set(), colorBy: "identity" };
+const S = { t: START_EPOCH, vessels: [], playing: true, speed: 60, lastPass: null, autoPassed: false, selected: null, used: new Set(), colorBy: "identity", analyst: "ais_trusting" };
 
 function newMmsi(prefix) {
   let m; do { m = prefix ? prefix * 1e6 + Math.floor(rand(0, 1e6)) : pick(MIDS) * 1e6 + Math.floor(rand(0, 1e6)); } while (S.used.has(m));
@@ -613,7 +673,7 @@ function reconcile(snap) {
   detections.forEach((d, i) => {
     const a = matches[i], h = hulls[i];
     if (a.mmsi != null) d.blind = { status: "matched", mmsi: a.mmsi, d: a.d, tol: a.tol, ok: a.mmsi === d.label };
-    else if (bridges.some(b => dist(h, b) <= tolerance(b))) d.blind = { status: "unresolved_gap" };
+    else if (bridges.some(b => dist(h, b) <= tolerance(b))) d.blind = { status: "unresolved_gap", near: bridges.filter(b => dist(h, b) <= tolerance(b)).map(b => b.mmsi) };
     else d.blind = { status: h.len >= MIN_DARK_VESSEL_LENGTH_M ? "dark_vessel" : "small_craft" };
   });
   return { t, snap, detections, ghosts, blindGhosts, registrySize: A.registry.size };
@@ -670,6 +730,103 @@ function inject(kind) {
   }[kind]();
   log("SIM", `Injected ${what}. Trigger a satellite pass to see how it's classified.`);
   select(v);
+}
+
+/* ========================================================= MARITIME AUDIT
+   Mirrors applications/maritime_threat_detection/audit.py and analyst_stub.py.
+   Presence is decided by the imagery; identity by AIS, and is often only unverifiable. */
+const PRESENCE_RADIUS_M = CORROBORATION_BASE_M, SAMPLE_POSITION_AGREEMENT_M = CORROBORATION_BASE_M;
+const CRITICAL_KINDS = new Set(["spoofing", "going_dark", "dark_vessel_count"]), POSITIONAL = new Set(["vessel_present", "spoofing"]);
+const SAMPLE_OMISSION_P = 0.15, SAMPLE_JITTER_M = 120, SAMPLE_MISCOUNT_P = 0.15;   // simulation settings, not thresholds
+const ANALYSTS = ["ais_trusting", "imagery_first", "alarmist"];
+
+function mkClaim(kind, attrs, text) {
+  const subject = attrs.mmsi != null ? `tile/mmsi:${attrs.mmsi}` : "tile";
+  return { id: `${kind}:${subject}`, kind, subject, ...attrs, text, critical: CRITICAL_KINDS.has(kind), hedged: false };
+}
+const C = {
+  present: (m, p) => mkClaim("vessel_present", { mmsi: m, x: p.x, y: p.y }, `MMSI ${m} is present at ${fmtLL(p)}`),
+  count: n => mkClaim("vessel_count", { count: n }, `${n} vessels are in the tile`),
+  dark: n => mkClaim("dark_vessel_count", { count: n }, n ? `${n} dark vessel(s) are in the tile` : "No dark vessels are in the tile"),
+  spoofing: (m, p) => mkClaim("spoofing", { mmsi: m, x: p.x, y: p.y }, `MMSI ${m} is spoofing: its hull is at ${fmtLL(p)}`),
+  goingDark: m => mkClaim("going_dark", { mmsi: m }, `MMSI ${m} has gone dark (switched AIS off)`),
+};
+
+const identities = (c, gt) => gt.r.detections.map(d => [dist(d.hull, c), d]).filter(([dd]) => dd <= PRESENCE_RADIUS_M)
+  .sort((a, b) => a[0] - b[0]).map(([dd, d]) => [dd, classifyDetection(c.mmsi, d.hull, d.v.len, gt.r.t, gt.A)]);
+const offImage = c => !inTile(c, GHOST_EDGE_INSET_M) && ["unverifiable", "claimed position is outside (or on the edge of) the imaged footprint"];
+
+const MARITIME_RULES = [
+  { name: "presence_in_imagery", kinds: ["vessel_present"], check(c, gt) {
+    const off = offImage(c); if (off) return off;
+    const ch = identities(c, gt);
+    if (!ch.length) return ["contradicted", `satellite sees no hull within ${PRESENCE_RADIUS_M} m of the claimed position`];
+    for (const [dd, v] of ch) if (v.cls === "corroborated") return ["supported", `hull ${Math.round(dd)} m from the claim; identity corroborated (${v.why})`];
+    const v = ch[0][1];
+    if (v.cls === "invalid_identity") return ["contradicted", `hull present, but ${v.why}: not a ship identity`];
+    if (v.cls === "position_discrepancy") return ["unverifiable", `hull present, but this MMSI's AIS is ${(v.gap / 1000).toFixed(1)} km away: identity unconfirmed`];
+    return ["unverifiable", `hull present; identity unconfirmed: ${v.why}`];
+  } },
+  { name: "hull_count", kinds: ["vessel_count"], check(c, gt) {
+    const n = gt.r.detections.length;
+    return [c.count === n ? "supported" : "contradicted", `satellite sees ${n} hull(s); report says ${c.count}`];
+  } },
+  { name: "dark_count", kinds: ["dark_vessel_count"], check(c, gt) {
+    const dark = gt.r.detections.filter(d => d.blind.status === "dark_vessel").length;
+    const unres = gt.r.detections.filter(d => d.blind.status === "unresolved_gap").length;
+    const seen = `blind association: ${dark} dark-vessel candidate(s), ${unres} unresolved`;
+    if (c.count < dark || c.count > dark + unres) return ["contradicted", `${seen}; report says ${c.count}`];
+    return unres ? ["unverifiable", `${seen}; AIS gaps leave the true count between ${dark} and ${dark + unres}`] : ["supported", seen];
+  } },
+  { name: "position_discrepancy", kinds: ["spoofing"], check(c, gt) {
+    const off = offImage(c); if (off) return off;
+    const ch = identities(c, gt);
+    if (!ch.length) return ["contradicted", `no hull within ${PRESENCE_RADIUS_M} m of where the report places it`];
+    for (const [, v] of ch) if (v.cls === "corroborated") return ["contradicted", `AIS agrees with the hull: ${v.why}`];
+    const v = ch[0][1];
+    return v.cls === "position_discrepancy" ? ["supported", `spoofing candidate for review: ${v.why}`] : ["unverifiable", `can't compare positions: ${v.why}`];
+  } },
+  { name: "ais_silence", kinds: ["going_dark"], check(c, gt) {
+    const bad = validateMmsi(c.mmsi);
+    if (bad) return ["unverifiable", `MMSI ${c.mmsi}: ${bad}`];
+    if (!gt.A.registry.has(c.mmsi)) return ["unverifiable", `MMSI ${c.mmsi} is not in this AIS feed, so its silence can't be measured`];
+    const p = gt.A.pos(c.mmsi, gt.r.t);
+    if (p) return ["contradicted", `AIS places it at image time (${p.method}, nearest fix ${p.age} s away)`];
+    const v = assessSilence(c.mmsi, gt.r.t, gt.A);
+    return v.cls === "potential_going_dark" ? ["supported", `going-dark candidate for review: ${v.why}`]
+                                            : ["unverifiable", `insufficient data, not evidence of evasion: ${v.why}`];
+  } },
+];
+const claimsAgree = (a, b) => a.kind === b.kind && a.subject === b.subject
+  && (POSITIONAL.has(a.kind) ? dist(a, b) <= SAMPLE_POSITION_AGREEMENT_M : a.count === b.count);
+
+// Stand-in analysts (Phase 3 replaces them). Draw 0 is the greedy report; draws 1..n are noisy samples.
+function draftReport(gt, style, draw) {
+  let s = 0; for (const ch of `${style}:${gt.r.t}:${draw}`) s = (Math.imul(s, 31) + ch.charCodeAt(0)) | 0;
+  const r = () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+  const noisy = draw > 0, dets = gt.r.detections;
+  let ships, count, dark;
+  if (style === "imagery_first") {
+    ships = dets.filter(d => d.blind.status === "matched").map(d => [d.blind.mmsi, d.hull]);
+    count = dets.length; dark = dets.filter(d => d.blind.status === "dark_vessel").length;
+  } else {
+    ships = [...gt.A.registry].sort((a, b) => a - b).map(m => [m, gt.A.pos(m, gt.r.t)]).filter(([, p]) => p && inTile(p, GHOST_EDGE_INSET_M));
+    count = ships.length; dark = 0;
+  }
+  if (noisy && r() < SAMPLE_MISCOUNT_P) count = Math.max(0, count + (r() < .5 ? -1 : 1));
+  const claims = [C.count(count)];
+  for (const [m, p] of ships) {
+    if (noisy && r() < SAMPLE_OMISSION_P) continue;
+    claims.push(C.present(m, noisy ? { x: p.x + gauss() * SAMPLE_JITTER_M, y: p.y + gauss() * SAMPLE_JITTER_M } : p));
+  }
+  if (style === "alarmist") {
+    const near = [...new Set(dets.filter(d => d.blind.status === "unresolved_gap").flatMap(d => d.blind.near))].sort((a, b) => a - b);
+    dark = dets.filter(d => ["dark_vessel", "unresolved_gap"].includes(d.blind.status)).length;
+    near.forEach(m => claims.push(C.goingDark(m)));
+  }
+  claims.push(C.dark(dark));
+  return { id: `${style}/draw${draw}`, claims };
 }
 
 /* =================================================================== RENDER */
@@ -870,47 +1027,74 @@ pos = <span class="f">position_at</span>(conn, mmsi, epoch=pass_time)
     },
   },
   {
-    id: "audit", title: "Faithfulness audit", tag: ["preview", "Phase 2 · preview"],
-    desc: "Preview of the core SDK (API subject to change). A simulated recon agent trusts AIS and writes an intel report; the auditor checks each claim symbolically against the satellite, scores consistency over 5 samples, fuses both, and blocks the report if a critical rule fails.",
-    code: `<span class="k">from</span> cat_is_judging <span class="k">import</span> FaithfulnessAuditor   <span class="c"># Phase 2: preview API</span>
+    id: "audit", title: "Faithfulness audit + guardrail", tag: ["shipped", "Phase 2 · shipped"], controls: "analyst",
+    desc: "A stand-in analyst writes a report about the satellite tile; the auditor checks every claim against ground truth (supported / contradicted / unverifiable), re-samples the analyst 5 times for consistency, fuses both into one score, and the guardrail passes, amends or blocks the report. Symbolic verdicts outrank consistency: a hallucination repeated in every sample still scores 0. Pick an analyst: ais_trusting repeats AIS (spoofed positions, ghosts), imagery_first reports what the satellite saw, alarmist accuses every ship with an AIS lapse of going dark.",
+    code: `<span class="k">from</span> cat_is_judging <span class="k">import</span> FaithfulnessViolation
+<span class="k">from</span> applications.maritime_threat_detection.audit <span class="k">import</span> MaritimeGroundTruth, make_guardrail
+<span class="k">from</span> applications.maritime_threat_detection.analyst_stub <span class="k">import</span> draft_report
 
-auditor = <span class="f">FaithfulnessAuditor</span>(
-    rules=maritime_rules,          <span class="c"># deterministic checks vs ground truth</span>
-    samples=<span class="n">5</span>,                     <span class="c"># self-consistency sampling</span>
-    threshold=<span class="n">0.95</span>,
-)
-result = auditor.<span class="f">audit</span>(claims=agent_report.claims, ground_truth=conn)
+gt = <span class="f">MaritimeGroundTruth</span>(conn)        <span class="c"># read-only ground truth</span>
+guard = <span class="f">make_guardrail</span>()               <span class="c"># maritime rules, pass at 0.95</span>
 
-<span class="k">if not</span> result.verdict:
-    <span class="k">raise</span> <span class="f">FaithfulnessViolation</span>(result.hallucinations)`,
+decision = guard.<span class="f">intercept</span>(
+    <span class="k">lambda</span> i: <span class="f">draft_report</span>(gt, tile_id, style, draw=i),   <span class="c"># 0 = report, 1..5 = samples</span>
+    gt, n_samples=<span class="n">5</span>)
+
+<span class="k">for</span> c <span class="k">in</span> decision.audit.claims:
+    log.<span class="f">info</span>(<span class="s">"%s %s cons=%s score=%.2f"</span>, c.outcome, c.claim.<span class="f">describe</span>(), c.consistency, c.score)
+
+<span class="k">if</span> decision.action == <span class="s">"block"</span>:
+    <span class="k">raise</span> <span class="f">FaithfulnessViolation</span>(decision)
+<span class="f">publish</span>(decision.released)            <span class="c"># original, or amended with [unverified] marks</span>`,
     run: function* () {
-      const r = currentPass();
-      const claims = [];
-      // The simulated agent trusts AIS: it reports every AIS ship in the footprint as present where AIS says.
-      const aisShips = S.vessels.filter(v => { const p = positionAt(v.fixes, r.t); return p && inTile(p); });
-      const flagged = r.detections.filter(d => d.cls !== "small_craft").length;
-      claims.push({ text: `${aisShips.length} vessels present in tile`, ok: aisShips.length === flagged, critical: false });
-      claims.push({ text: "No dark or unidentified vessels in tile", ok: !r.detections.some(d => ["dark_vessel", "invalid_identity", "unmatched_identity"].includes(d.cls)), critical: true });
-      for (const d of r.detections.filter(d => d.cls === "position_discrepancy"))
-        claims.push({ text: `mmsi=${d.label} at ${fmtLL(d.pos)} (per AIS)`, ok: false, critical: true, why: `hull observed ${(d.gap / 1000).toFixed(1)} km away` });
-      for (const g of r.ghosts)
-        claims.push({ text: `mmsi=${g.v.mmsi} present at ${fmtLL(g.pos)}`, ok: false, critical: true, why: "no hull in imagery" });
-      const sample = r.detections.find(d => d.cls === "corroborated");
-      if (sample) claims.push({ text: `mmsi=${sample.label} corroborated`, ok: true, critical: false });
-
-      yield ["INFO", `agent report: ${claims.length} atomic claims extracted · pass_time=${iso(r.t)}`];
-      let total = 0, failedCritical = 0;
-      for (const c of claims) {
-        const sym = c.ok ? 1 : 0, cons = c.ok ? 0.88 + rng() * 0.12 : 0.45 + rng() * 0.3, score = 0.7 * sym + 0.3 * cons;
-        total += score; if (!c.ok && c.critical) failedCritical++;
-        yield [c.ok ? "OK" : "ALERT", `${c.ok ? "VERIFIED " : "HALLUCINATION"} "${c.text}"  symbolic=${sym} consistency=${cons.toFixed(2)} fused=${score.toFixed(2)}${c.why ? `  · ${c.why}` : ""}`];
+      const r = currentPass(), gt = { r, A: lookup() }, style = S.analyst;
+      const report = draftReport(gt, style, 0), samples = [1, 2, 3, 4, 5].map(i => draftReport(gt, style, i));
+      yield ["INFO", `analyst=${style} · ${report.claims.length} claims · 5 consistency samples · pass_time=${iso(r.t)}`];
+      const d = guard(report, gt, samples, MARITIME_RULES, claimsAgree), a = d.audit;
+      for (const c of a.claims) {
+        const lvl = c.outcome === "supported" ? "OK" : c.outcome === "contradicted" ? "ALERT" : "WARN";
+        yield [lvl, `${c.outcome.padEnd(12)} ${c.claim.critical ? "[critical] " : ""}"${describe(c.claim)}"  cons=${c.consistency == null ? "—" : c.consistency.toFixed(2)} score=${c.score.toFixed(2)} · ${c.evidence}`];
       }
-      const f = total / claims.length;
-      yield ["INFO", `faithfulness=${f.toFixed(3)} threshold=0.95 critical_failures=${failedCritical}`];
-      yield failedCritical || f < .95
-        ? ["ALERT", `FaithfulnessViolation: report blocked. ${failedCritical} critical claim(s) contradict ground truth.`]
-        : ["OK", "verdict=PASS · report released"];
-      yield ["SIM", "[preview] simulated scores; the Phase 2 SDK replaces this with the real verifier and sampler"];
+      yield ["INFO", `faithfulness=${a.score.toFixed(3)} · pass ≥ ${PASS_THRESHOLD} · block < ${BLOCK_BELOW} · ${a.supported.length} supported, ${a.hallucinations.length} contradicted, ${a.unverified.length} unverifiable`];
+      if (d.action === "block") { yield ["ALERT", `BLOCK · FaithfulnessViolation: ${d.reason}. Nothing released.`]; return; }
+      yield [d.action === "pass" ? "OK" : "WARN", `${d.action.toUpperCase()} · ${d.reason}${d.amended ? ` · amended score ${d.amended.score.toFixed(3)}` : ""}`];
+      for (const c of d.released.claims) yield ["SIM", `released: ${describe(c)}`];
+    },
+  },
+  {
+    id: "core", title: "Bring your own domain", tag: ["shipped", "Phase 2 · shipped"],
+    desc: "The auditor core knows nothing about ships. A domain supplies rules (claim → supported / contradicted / unverifiable, with evidence) and a ground-truth object; the verifier, consistency scorer, fusion and guardrail are the same ones the maritime demo uses. This runs the toy example from the test suite.",
+    code: `<span class="k">from</span> cat_is_judging <span class="k">import</span> Claim, FaithfulnessAuditor, Guardrail, Report, rule
+
+TRUTH = {<span class="s">"France"</span>: <span class="s">"Paris"</span>, <span class="s">"Japan"</span>: <span class="s">"Tokyo"</span>, <span class="s">"Peru"</span>: <span class="n">None</span>}   <span class="c"># None: not on record</span>
+
+<span class="k">@</span><span class="f">rule</span>(<span class="s">"capital"</span>)
+<span class="k">def</span> <span class="f">capital_rule</span>(c, gt):
+    <span class="k">if</span> gt.<span class="f">get</span>(c.subject) <span class="k">is</span> <span class="n">None</span>:
+        <span class="k">return</span> <span class="s">"unverifiable"</span>, <span class="s">f"no record for {c.subject}"</span>
+    ok = gt[c.subject] == c.attributes[<span class="s">"city"</span>]
+    <span class="k">return</span> (<span class="s">"supported"</span> <span class="k">if</span> ok <span class="k">else</span> <span class="s">"contradicted"</span>), <span class="s">f"record says {gt[c.subject]}"</span>
+
+guard = <span class="f">Guardrail</span>(<span class="f">FaithfulnessAuditor</span>([capital_rule]))
+decision = guard.<span class="f">review</span>(report, TRUTH, samples)`,
+    run: function* () {
+      const TRUTH = { France: "Paris", Japan: "Tokyo", Peru: null };
+      const capitalRule = { name: "capital_rule", kinds: ["capital"], check(c, gt) {
+        if (gt[c.subject] == null) return ["unverifiable", `no record for ${c.subject}`];
+        return [gt[c.subject] === c.city ? "supported" : "contradicted", `record says ${gt[c.subject]}`];
+      } };
+      const cap = (id, country, city) => ({ id, kind: "capital", subject: country, city, text: `The capital of ${country} is ${city}`, critical: false, hedged: false });
+      const same = (a, b) => a.kind === b.kind && a.subject === b.subject && a.city === b.city;
+      const report = { id: "r", claims: [cap("fr", "France", "Paris"), cap("jp", "Japan", "Tokyo"), cap("pe", "Peru", "Lima"), cap("jp2", "Japan", "Kyoto")] };
+      const samples = [report, { id: "s2", claims: report.claims.slice(0, 3) }, { id: "s3", claims: [report.claims[0], report.claims[3]] }];
+      yield ["INFO", `report: ${report.claims.length} claims · ${samples.length} samples`];
+      const d = guard(report, TRUTH, samples, [capitalRule], same);
+      for (const c of d.audit.claims)
+        yield [c.outcome === "supported" ? "OK" : c.outcome === "contradicted" ? "ALERT" : "WARN",
+               `${c.outcome.padEnd(12)} "${c.claim.text}"  cons=${c.consistency.toFixed(2)} score=${c.score.toFixed(2)} · ${c.evidence}`];
+      yield ["INFO", `faithfulness=${d.audit.score.toFixed(3)}`];
+      yield ["WARN", `${d.action.toUpperCase()} · ${d.reason}`];
+      for (const c of d.released.claims) yield ["SIM", `released: ${describe(c)}`];
     },
   },
 ];
@@ -922,10 +1106,14 @@ function renderTabs() {
   const s = SNIPPETS[activeSnippet];
   document.getElementById("snippet").innerHTML = `<pre class="code">${s.code}</pre>
     <div class="runpane"><div class="runbar"><span class="meta"><span class="tag t-${s.tag[0]}">${s.tag[1]}</span></span>
+      ${s.controls === "analyst" ? `<label class="sub" style="margin:0;font-size:.82rem">Analyst <select id="analyst">${ANALYSTS.map(a =>
+        `<option value="${a}"${a === S.analyst ? " selected" : ""}>${a}</option>`).join("")}</select></label>` : ""}
       <button class="btn small" id="exec">Execute SDK Sandbox</button></div>
       <div class="log" id="execlog"><div class="lv-SIM">$ press “Execute SDK Sandbox”: runs against the simulator's current state</div></div></div>
     <div class="snipdesc">${esc(s.desc)}</div>`;
   document.getElementById("exec").onclick = execute;
+  const an = document.getElementById("analyst");
+  if (an) an.onchange = e => S.analyst = e.target.value;
 }
 document.getElementById("tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-i]"); if (!b) return; activeSnippet = +b.dataset.i; renderTabs();
