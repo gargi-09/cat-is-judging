@@ -1,0 +1,42 @@
+{
+  "name": "example_georeferenced",
+  "description": "Template for a dataset whose detections are already in lat/lon (e.g. SAR or other optical detections). Copy it, point the paths at your files and map your column names on the right-hand side.",
+  "label_provenance": "independent",
+  "ais": {
+    "path": "ais.csv",
+    "utc_offset": "auto",
+    "columns": {
+      "mmsi": "MMSI",
+      "postime": "BaseDateTime",
+      "lat": "LAT",
+      "lon": "LON",
+      "sog": "SOG",
+      "cog": "COG",
+      "hdg": "Heading",
+      "vessel_name": "VesselName",
+      "length": "Length",
+      "width": "Width"
+    }
+  },
+  "imagery": {
+    "format": "georeferenced_csv",
+    "annotations": "detections.csv",
+    "scenes": "scenes.csv",
+    "columns": {
+      "scene_id": "scene_id",
+      "lat": "detect_lat",
+      "lon": "detect_lon",
+      "length_m": "vessel_length_m",
+      "label": "mmsi",
+      "heading_deg": "heading"
+    },
+    "scene_columns": {
+      "scene_id": "scene_id",
+      "acquired_at": "sensing_time_utc",
+      "lat_min": "south",
+      "lat_max": "north",
+      "lon_min": "west",
+      "lon_max": "east"
+    }
+  }
+}

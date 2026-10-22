@@ -50,8 +50,10 @@ def gt() -> A.MaritimeGroundTruth:
     corners = [ll(0, 0), ll(SIZE, 0), ll(0, SIZE), ll(SIZE, SIZE)]
     lats, lons = [c[0] for c in corners], [c[1] for c in corners]
     conn.execute(
-        "INSERT INTO optical_tiles VALUES (?, 'S2', '40RDN', '', ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, 4, '', NULL)",
-        (TILE, T, X0, Y0, SIZE, SIZE, min(lats), max(lats), min(lons), max(lons)))
+        "INSERT INTO optical_tiles (tile_id, mgrs_tile, acquired_at, acquired_epoch, px_x, px_y, width_px, height_px, "
+        "gsd_m, utm_zone, utm_south, ulx, uly, origin_source, lat_min, lat_max, lon_min, lon_max, n_detections) "
+        "VALUES (?, '40RDN', '', ?, ?, ?, ?, ?, 10, ?, 0, ?, ?, 'registered', ?, ?, ?, ?, 4)",
+        (TILE, T, X0, Y0, SIZE, SIZE, GRID.utm_zone, GRID.ulx, GRID.uly, min(lats), max(lats), min(lons), max(lons)))
     hulls = [(538000001, HULL_A, 180), (538000002, HULL_B, 200), (538000003, HULL_C, 150), (None, HULL_D, 80)]
     conn.executemany(
         "INSERT INTO optical_detections (tile_id, shape_index, mmsi, center_lat, center_lon, center_px_x, center_px_y, "

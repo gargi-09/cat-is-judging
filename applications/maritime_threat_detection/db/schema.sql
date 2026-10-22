@@ -48,25 +48,32 @@ CREATE INDEX IF NOT EXISTS idx_ais_postime     ON ais_positions (postime_epoch);
 -- Covering index for the hot path "where was MMSI x at time t" (track interpolation).
 CREATE INDEX IF NOT EXISTS idx_ais_mmsi_time   ON ais_positions (mmsi, postime_epoch);
 
--- One row per Sentinel-2 image chip (one annotation JSON / PNG pair).
+-- One row per image footprint ("tile"): a Sentinel-2 chip (pixel grid + UTM origin) or,
+-- for datasets that ship georeferenced detections, a scene with only a lat/lon box.
+-- The georeference lives in the row, so a database is self-contained.
 CREATE TABLE IF NOT EXISTS optical_tiles (
     tile_id          TEXT PRIMARY KEY,  -- e.g. "T40RDN_20260303_x3416_y1315"
-    product_id       TEXT NOT NULL,     -- Sentinel-2 SAFE product name
-    mgrs_tile        TEXT NOT NULL,
-    acquired_at      TEXT NOT NULL,     -- datatake sensing start, ISO 8601 UTC
+    product_id       TEXT,              -- e.g. Sentinel-2 SAFE product name
+    mgrs_tile        TEXT,
+    acquired_at      TEXT NOT NULL,     -- sensing time, ISO 8601 UTC
     acquired_epoch   INTEGER NOT NULL,
-    px_x             INTEGER NOT NULL,  -- chip top-left column in the full MGRS raster
-    px_y             INTEGER NOT NULL,  -- chip top-left row in the full MGRS raster
-    width_px         INTEGER NOT NULL,
-    height_px        INTEGER NOT NULL,
-    gsd_m            REAL    NOT NULL,
+    px_x             INTEGER,           -- chip top-left column in the full MGRS raster
+    px_y             INTEGER,           -- chip top-left row in the full MGRS raster
+    width_px         INTEGER,
+    height_px        INTEGER,
+    gsd_m            REAL,
+    utm_zone         INTEGER,           -- pixel grid georeference (NULL for lat/lon-box scenes)
+    utm_south        INTEGER,
+    ulx              REAL,
+    uly              REAL,
+    origin_source    TEXT NOT NULL,     -- metadata | registered | derived | bbox
     lat_min          REAL NOT NULL,
     lat_max          REAL NOT NULL,
     lon_min          REAL NOT NULL,
     lon_max          REAL NOT NULL,
     n_detections     INTEGER NOT NULL,
-    json_path        TEXT NOT NULL,     -- repo-relative
-    png_path         TEXT               -- repo-relative; NULL if the PNG is missing
+    json_path        TEXT,              -- annotation source, repo-relative where possible
+    png_path         TEXT               -- repo-relative; NULL if no image
 );
 
 CREATE INDEX IF NOT EXISTS idx_tiles_bbox ON optical_tiles (lat_min, lat_max, lon_min, lon_max);
@@ -80,13 +87,13 @@ CREATE TABLE IF NOT EXISTS optical_detections (
     mmsi              INTEGER,            -- normalised label; NULL for 0/"unknown"/unparseable
     center_lat        REAL NOT NULL,
     center_lon        REAL NOT NULL,
-    center_px_x       REAL NOT NULL,      -- chip-local pixel coordinates
-    center_px_y       REAL NOT NULL,
-    length_m          REAL NOT NULL,      -- long side of the rotated box at tile GSD
-    width_m           REAL NOT NULL,
-    axis_bearing_deg  REAL NOT NULL,      -- long-axis bearing from true north, [0, 180): bow/stern ambiguous
-    shape_type        TEXT NOT NULL,
-    polygon_px        TEXT NOT NULL,      -- JSON [[x, y], ...] chip-local
+    center_px_x       REAL,               -- chip-local pixel coordinates (NULL without a pixel grid)
+    center_px_y       REAL,
+    length_m          REAL NOT NULL,      -- hull length; rows without one are dropped, never guessed
+    width_m           REAL,
+    axis_bearing_deg  REAL,               -- long-axis bearing from true north, [0, 180); NULL if unknown
+    shape_type        TEXT,
+    polygon_px        TEXT,               -- JSON [[x, y], ...] chip-local
     UNIQUE (tile_id, shape_index)
 );
 
@@ -104,5 +111,13 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     rows_loaded        INTEGER NOT NULL,
     rows_dropped_json  TEXT NOT NULL,     -- {"reason": count}
     tiles_loaded       INTEGER NOT NULL,
-    detections_loaded  INTEGER NOT NULL
+    detections_loaded  INTEGER NOT NULL,
+    dataset_name       TEXT NOT NULL DEFAULT 'default',
+    imagery_format     TEXT NOT NULL DEFAULT 'sentinel2_labelme',
+    -- How the annotation labels were made. "ais_matched" labels can't measure dark-vessel
+    -- recall (it would be circular); only "independent" labels can.
+    label_provenance   TEXT NOT NULL DEFAULT 'ais_matched',
+    ais_offset_method  TEXT NOT NULL DEFAULT 'manual',  -- manual | auto (label-free sweep)
+    offset_sweep_json  TEXT,                            -- the sweep, when auto
+    manifest_json      TEXT                             -- the dataset manifest used
 );

@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from applications.maritime_threat_detection import ANNOTATIONS_DIR, IMAGES_DIR, REPO_ROOT
-from applications.maritime_threat_detection.geo import S2_TILE_GRID, S2TileGrid, pixel_to_latlon
+from applications.maritime_threat_detection.geo import S2TileGrid, pixel_to_latlon, s2_grid
 
 _TILE_NAME_RE = re.compile(
     r"^(?P<product>S2[A-D]_MSIL[12][AC]_(?P<sensing>\d{8}T\d{6})_N\d{4}_R\d{3}"
@@ -45,15 +45,15 @@ class OpticalDetection(BaseModel):
     shape_index: int
     label_raw: str
     mmsi: int | None = Field(description="Normalised MMSI; None when the label carries no identity")
-    shape_type: str
-    polygon_px: list[tuple[float, float]] = Field(description="Chip-local pixel coordinates")
-    center_px: tuple[float, float]
+    shape_type: str | None = None
+    polygon_px: list[tuple[float, float]] = Field(default_factory=list, description="Chip-local pixel coordinates")
+    center_px: tuple[float, float] | None = None
     center_lat: float
     center_lon: float
     length_m: float = Field(description="Long side of the rotated box at tile GSD")
-    width_m: float
-    axis_bearing_deg: float = Field(
-        description="Long-axis bearing from true north in [0, 180); optics cannot tell bow from stern"
+    width_m: float | None = None
+    axis_bearing_deg: float | None = Field(
+        default=None, description="Long-axis bearing from true north in [0, 180); optics cannot tell bow from stern"
     )
 
 
@@ -61,19 +61,24 @@ class OpticalTile(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tile_id: str
-    product_id: str
-    mgrs_tile: str
+    product_id: str | None = None
+    mgrs_tile: str | None = None
     acquired_at: datetime
-    px_x: int
-    px_y: int
-    width_px: int
-    height_px: int
-    gsd_m: float
+    px_x: int | None = None
+    px_y: int | None = None
+    width_px: int | None = None
+    height_px: int | None = None
+    gsd_m: float | None = None
+    utm_zone: int | None = None
+    utm_south: bool | None = None
+    ulx: float | None = None
+    uly: float | None = None
+    origin_source: str = "bbox"
     lat_min: float
     lat_max: float
     lon_min: float
     lon_max: float
-    json_path: str = Field(description="Repo-relative POSIX path")
+    json_path: str | None = Field(default=None, description="Annotation source, repo-relative where possible")
     png_path: str | None
     detections: list[OpticalDetection]
     skipped_shapes: int = 0
@@ -127,11 +132,11 @@ def _box_geometry(points: list[tuple[float, float]]) -> tuple[float, float, floa
     return long_px, short_px, bearing
 
 
-def load_tile(json_path: Path, *, grid_registry: dict[str, S2TileGrid] = S2_TILE_GRID) -> OpticalTile:
+def load_tile(json_path: Path, *, origins: dict[str, S2TileGrid] | None = None,
+              images_dir: Path = IMAGES_DIR) -> OpticalTile:
+    """Parse one chip. Origins from tile metadata win; else registered; else derived from MGRS."""
     product_id, mgrs, sensing, px_x, px_y = parse_tile_name(json_path.stem)
-    grid = grid_registry.get(mgrs)
-    if grid is None:
-        raise KeyError(f"No Sentinel-2 grid origin registered for MGRS tile {mgrs}")
+    grid = s2_grid(mgrs, origins)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     width, height = int(payload["imageWidth"]), int(payload["imageHeight"])
 
@@ -165,7 +170,7 @@ def load_tile(json_path: Path, *, grid_registry: dict[str, S2TileGrid] = S2_TILE
         )
 
     corners = [pixel_to_latlon(grid, px_x + dx, px_y + dy) for dx in (0, width) for dy in (0, height)]
-    png = IMAGES_DIR / f"{json_path.stem}.png"
+    png = images_dir / f"{json_path.stem}.png"
     return OpticalTile(
         tile_id=make_tile_id(mgrs, sensing, px_x, px_y),
         product_id=product_id,
@@ -176,6 +181,11 @@ def load_tile(json_path: Path, *, grid_registry: dict[str, S2TileGrid] = S2_TILE
         width_px=width,
         height_px=height,
         gsd_m=grid.gsd_m,
+        utm_zone=grid.utm_zone,
+        utm_south=grid.south,
+        ulx=grid.ulx,
+        uly=grid.uly,
+        origin_source=grid.origin_source,
         lat_min=min(c[0] for c in corners),
         lat_max=max(c[0] for c in corners),
         lon_min=min(c[1] for c in corners),
@@ -187,8 +197,9 @@ def load_tile(json_path: Path, *, grid_registry: dict[str, S2TileGrid] = S2_TILE
     )
 
 
-def load_all_tiles(annotations_dir: Path = ANNOTATIONS_DIR) -> list[OpticalTile]:
-    return [load_tile(p) for p in sorted(annotations_dir.glob("*.json"))]
+def load_all_tiles(annotations_dir: Path = ANNOTATIONS_DIR, *, origins: dict[str, S2TileGrid] | None = None,
+                   images_dir: Path = IMAGES_DIR) -> list[OpticalTile]:
+    return [load_tile(p, origins=origins, images_dir=images_dir) for p in sorted(annotations_dir.glob("*.json"))]
 
 
 def _repo_relative(path: Path) -> str:

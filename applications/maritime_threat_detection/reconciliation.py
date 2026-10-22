@@ -31,7 +31,7 @@ from applications.maritime_threat_detection.db.ais_repository import (
     position_across_gap,
     position_at,
 )
-from applications.maritime_threat_detection.geo import S2_TILE_GRID, haversine_m, latlon_to_pixel
+from applications.maritime_threat_detection.geo import S2TileGrid, haversine_m, latlon_to_pixel
 
 # --- identity verification ---------------------------------------------------------
 # Base corroboration radius. With interpolation to the image second, observed AIS-vs-hull
@@ -212,7 +212,7 @@ class Hull:
     lat: float
     lon: float
     length_m: float
-    axis_bearing_deg: float  # [0, 180)
+    axis_bearing_deg: float | None  # [0, 180); None when the source gives no orientation
 
 
 @dataclass
@@ -238,7 +238,7 @@ def pair_cost(h: Hull, p: TrackPosition, ais_length_m: float | None) -> tuple[fl
     terms = {"distance": (d / tol) ** 2}
     if ais_length_m:
         terms["length"] = LENGTH_WEIGHT * (abs(h.length_m - ais_length_m) / max(h.length_m, ais_length_m)) ** 2
-    if p.course_deg is not None:
+    if p.course_deg is not None and h.axis_bearing_deg is not None:
         terms["heading"] = HEADING_WEIGHT * (_axis_diff_deg(h.axis_bearing_deg, p.course_deg) / 90.0) ** 2
     return (sum(terms.values()) if d <= tol else _GATED_COST), terms, d, tol
 
@@ -325,11 +325,25 @@ def tile_candidates(tile: sqlite3.Row, ais: AISLookup) -> list[TrackPosition]:
     return out
 
 
+def tile_grid(tile: sqlite3.Row) -> S2TileGrid | None:
+    """The pixel grid stored with a tile, or None for a scene that only has a lat/lon box."""
+    if tile["ulx"] is None:
+        return None
+    return S2TileGrid(tile["mgrs_tile"] or "", tile["utm_zone"], tile["ulx"], tile["uly"], tile["gsd_m"],
+                      bool(tile["utm_south"]), tile["origin_source"])
+
+
 def inside_chip(tile: sqlite3.Row, lat: float, lon: float, inset_px: float = GHOST_EDGE_INSET_PX) -> bool:
-    col, row = latlon_to_pixel(S2_TILE_GRID[tile["mgrs_tile"]], lat, lon)
+    """Inside the imaged footprint, at least ``inset_px`` pixels (x 10 m for lat/lon boxes) from its edge."""
+    grid = tile_grid(tile)
+    if grid is None:
+        dlat = inset_px * 10.0 / 111_320.0
+        dlon = dlat / math.cos(math.radians((tile["lat_min"] + tile["lat_max"]) / 2))
+        return (tile["lat_min"] + dlat <= lat <= tile["lat_max"] - dlat
+                and tile["lon_min"] + dlon <= lon <= tile["lon_max"] - dlon)
+    col, row = latlon_to_pixel(grid, lat, lon)
     lx, ly = col - tile["px_x"], row - tile["px_y"]
     return inset_px <= lx <= tile["width_px"] - inset_px and inset_px <= ly <= tile["height_px"] - inset_px
-
 
 
 
@@ -380,8 +394,18 @@ def _pct(values: list[float], q: float) -> float:
     return s[min(len(s) - 1, int(round(q * (len(s) - 1))))]
 
 
-def cross_reference(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Run both modes over every chip and score blind association against the labels."""
+def label_provenance(conn: sqlite3.Connection) -> str:
+    row = conn.execute("SELECT label_provenance FROM ingest_runs ORDER BY id DESC LIMIT 1").fetchone()
+    return row[0] if row else "ais_matched"
+
+
+def cross_reference(conn: sqlite3.Connection, provenance: str | None = None) -> dict[str, Any]:
+    """Run both modes over every chip and score blind association against the labels.
+
+    Dark-vessel recall is only reported when the labels were made independently of AIS
+    (``provenance == "independent"``); with AIS-matched labels it would be circular.
+    """
+    provenance = provenance or label_provenance(conn)
     ais = AISLookup(conn)
     tiles = conn.execute("SELECT * FROM optical_tiles ORDER BY tile_id").fetchall()
     dets = conn.execute("SELECT * FROM optical_detections ORDER BY id").fetchall()
@@ -411,6 +435,7 @@ def cross_reference(conn: sqlite3.Connection) -> dict[str, Any]:
     ghosts: list[dict[str, Any]] = []
     wrong: list[dict[str, Any]] = []
     unresolved_has_truth = 0
+    dark_on_labelled = dark_hits = 0
     for t in tiles:
         tdets = by_tile.get(t["tile_id"], [])
         results, tghosts = associate_tile(t, tdets, ais)
@@ -426,12 +451,21 @@ def cross_reference(conn: sqlite3.Connection) -> dict[str, Any]:
                                   "distance_m": round(r.assignment.distance_m or 0)})
             elif r.status == "unresolved_gap" and truth in r.near_gap_mmsis:
                 unresolved_has_truth += 1
+            elif r.status == "dark_vessel":
+                dark_on_labelled += truth is not None
+                dark_hits += truth is None
         ghosts += [{"tile_id": t["tile_id"], "mmsi": g.mmsi, "method": g.method} for g in tghosts]
 
     placeable = sum(1 for d in dets if d["mmsi"] in ais.registry and ais.position(d["mmsi"], epoch_of[d["tile_id"]]))
     matched = outcome["correct"] + outcome["wrong"]
+    true_dark = sum(1 for d in dets if d["mmsi"] is None and d["length_m"] >= MIN_DARK_VESSEL_LENGTH_M)
+    if provenance == "independent":
+        dark_recall: float | str | None = round(dark_hits / true_dark, 4) if true_dark else None
+    else:
+        dark_recall = "not measurable: labels were made by matching to AIS"
     return {
         "detections_total": len(dets),
+        "label_provenance": provenance,
         "identity_verification": {
             "verdicts": dict(sorted(verdicts.items())),
             "threat_candidates": sum(n for k, n in verdicts.items() if k in THREAT_VERDICTS),
@@ -453,9 +487,10 @@ def cross_reference(conn: sqlite3.Connection) -> dict[str, Any]:
             "unresolved_gap_contains_true_ship": unresolved_has_truth,
             "threat_candidates": {"dark_vessel": status["dark_vessel"], "ghost_ais": len(ghosts),
                                   "ghost_ais_vessels": len({g["mmsi"] for g in ghosts})},
-            # Every label in this dataset is a real AIS vessel, so each blind "dark vessel"
-            # is by construction a false alarm — reported, not hidden.
-            "false_dark_rate": round(status["dark_vessel"] / len(dets), 4) if dets else None,
+            # A blind "dark vessel" on a hull the labels identify as an AIS ship is a false alarm.
+            "false_dark_rate": round(dark_on_labelled / len(dets), 4) if dets else None,
+            "labelled_dark_hulls": true_dark,  # unidentified hulls >= 30 m in the labels
+            "dark_vessel_recall": dark_recall,
             "wrong_assignments": wrong[:25],
             "ghost_ais_examples": ghosts[:10],
         },

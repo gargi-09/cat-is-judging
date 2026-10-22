@@ -3,8 +3,8 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/tests-71%20passing-brightgreen?logo=pytest&logoColor=white)](tests/)
-[![Status](https://img.shields.io/badge/status-phase%202%20of%205-orange)](#roadmap)
+[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![Status](https://img.shields.io/badge/status-phase%203%20of%205-orange)](#roadmap)
 [![Interactive Sandbox](https://img.shields.io/badge/interactive-sandbox-7c3aed?logo=githubpages&logoColor=white)](https://gargi-09.github.io/cat-is-judging/)
 
 Neurosymbolic faithfulness auditing for RAG systems: catches hallucinated answers by combining symbolic verification against ground truth with self-consistency scoring.
@@ -28,8 +28,9 @@ The sandbox runs on simulated data, using a JavaScript port of the repo's reconc
 | 1 | Data engineering: AIS + Sentinel-2 annotations → indexed SQLite ground truth | ![done](https://img.shields.io/badge/-done-brightgreen) |
 | 1.5 | Refined threat rules and label-free association, scored against the labels | ![done](https://img.shields.io/badge/-done-brightgreen) |
 | 2 | Core SDK: symbolic verifier, consistency scorer, fuser, guardrail interceptor | ![done](https://img.shields.io/badge/-done-brightgreen) |
-| 3 | Recon agent and typed AIS / optical tools | ![next](https://img.shields.io/badge/-next-blue) |
-| 4 | Golden eval set and CI faithfulness gate | ![planned](https://img.shields.io/badge/-planned-lightgrey) |
+| 2.5 | Dataset adapter: manifests, any Sentinel-2 tile, georeferenced imagery, label-free clock sweep | ![done](https://img.shields.io/badge/-done-brightgreen) |
+| 3 | Recon agent and typed AIS / optical tools | ![done](https://img.shields.io/badge/-done-brightgreen) |
+| 4 | Golden eval set and CI faithfulness gate | ![next](https://img.shields.io/badge/-next-blue) |
 | 5 | CLI / FastAPI interface and case study | ![planned](https://img.shields.io/badge/-planned-lightgrey) |
 
 ## Results so far
@@ -44,6 +45,8 @@ One day of AIS (2026-03-03, 52,548 fixes, 182 vessels) against 475 annotated shi
 | Position discrepancy (spoofing candidate, 1.4–58 km off) | 10 | **yes** |
 | AIS reception gap (insufficient data) | 71 | no |
 | Potential going dark (≥ 12 h silence with good fleet reception) | 0 | yes |
+
+Three of the six vessels behind the spoofing candidates sat at anchor on their hulls until about 05:20. Then their AIS jumped tens of km away, reporting 33–48 knots, while the satellite still saw them at the anchorage at 06:47. That is consistent with spoofing or GNSS interference, and they stay *candidates* for review.
 
 **Blind association** ignores the labels and matches hulls to AIS tracks by position, length and heading (Hungarian algorithm). The labels are then used as the answer key:
 
@@ -63,7 +66,7 @@ How the rules were set, and what they deliberately don't do:
 - **Gap routes** are not used to assign identity. A straight line across multi-hour gaps picked the right ship only ~11% of the time in dense anchorages, so it is only used to withhold false dark-vessel alarms.
 - **Dataset limit:** the labels were themselves made by matching to AIS, so the data contains no true dark vessels. Dark and spoofing behaviour is demonstrated with injected cases, and every alert is a *candidate* for review.
 - **Georeferencing:** the chips carry no coordinates. They are georeferenced from the Sentinel-2 tile ID and pixel offset, and agree with AIS to within a few pixels.
-- **Timestamps:** AIS timestamps are read as UTC. This was chosen empirically; the `eta` column's `+08` offset is misleading.
+- **Timestamps:** AIS timestamps are read as UTC. This was chosen empirically; the `eta` column's `+08` offset is misleading. The label-free clock sweep (below) says "ambiguous" on this data rather than guess: most ships are anchored, which says nothing about the clock.
 
 ## The auditor (Phase 2)
 
@@ -90,7 +93,38 @@ On the real data, three stand-in analysts each wrote one report per tile (183 ti
 | `ais_trusting`: repeats AIS, including positions with no hull behind them | 115 | 54 | 14 |
 | `alarmist`: calls every AIS lapse "going dark" | 115 | 33 | 35 |
 
-The `imagery_first` amendments are tiles where AIS gaps leave "no dark vessels" unprovable, so that claim is hedged rather than asserted. Two `ais_trusting` blocks trace back to blind association's own 2 false dark alarms: the auditor is only as good as its rules. The analysts are placeholders until Phase 3.
+The `imagery_first` amendments are tiles where AIS gaps leave "no dark vessels" unprovable, so that claim is hedged rather than asserted. Two `ais_trusting` blocks trace back to blind association's own 2 false dark alarms: the auditor is only as good as its rules. These rule-based analysts stay as cheap, reproducible baselines; the LLM analyst below is the real subject.
+
+## The analyst (Phase 3)
+
+The thing being audited is an LLM analyst: Claude Opus 5.5 investigates one tile through seven typed, read-only tools and writes a structured report. The report is split into atomic claims, and the auditor and guardrail above decide what is released.
+
+- **Same evidence a human analyst would get.** The tools return hulls with position, length and orientation but **no identity** (the annotator labels were made from AIS, so showing them would be circular), plus AIS estimates with their uncertainty, raw tracks, MMSI validity, and the 12 h going-dark assessment.
+- **Measurements, not verdicts.** `compare_hull_to_ais` returns distance and tolerance, never "spoofing". Calling something a spoofer is the analyst's claim, and the auditor checks it.
+- **Report as structured output.** The final report is schema-constrained JSON (`output_config.format`), not a forced tool call, which Opus 5.5 doesn't allow.
+- **Consistency samples are re-runs.** Thinking is always on and `temperature` isn't available on this model, so self-consistency compares independent runs. Refusals fall back server-side (`fallbacks: "default"`).
+- **Status:** tested offline with a scripted client: request shape, tool round trips, errors, refusals, the turn budget, and a hallucinated ghost being cut even when the analyst repeats it in every sample. **It has not yet been run against the live API, so there are no LLM results to report.** Run it from the local dashboard or in code (needs `ANTHROPIC_API_KEY`):
+
+```python
+from applications.maritime_threat_detection.analyst import ReconAnalyst
+from applications.maritime_threat_detection.audit import MaritimeGroundTruth, make_guardrail
+
+decision = make_guardrail().intercept(ReconAnalyst().generator(gt, tile_id), gt, n_samples=2)
+```
+
+## Bring your own dataset
+
+A new AIS + imagery dataset is described in a `dataset.json` manifest, not in code. The manifest says where the files are, which source column means what, what timezone the AIS clock is in (or `"auto"`), and how the labels were made. See [`datasets/example_georeferenced.json`](applications/maritime_threat_detection/datasets/example_georeferenced.json).
+
+```bash
+python -m applications.maritime_threat_detection.scripts.ingest_telemetry --manifest path/to/dataset.json
+```
+
+- **Imagery:** Sentinel-2 Labelme chips from any tile, in either hemisphere, or detections already in lat/lon (for example from SAR) plus a file of scene footprints. A tile's origin comes from its `MTD_TL.xml` when supplied (exact), else the MGRS square (within ~45 m).
+- **Columns:** only `mmsi`, time, `lat` and `lon` are required from AIS. A mistyped column name is an error, not a silent gap. Unusable rows (no hull length, unknown scene, outside the footprint) are dropped with a reason, never guessed.
+- **Label provenance:** `ais_matched`, `independent` or `none`. **Dark-vessel recall** is reported only for `independent` labels; with AIS-matched labels it would be circular, and the report says so.
+- **Clock:** `"utc_offset": "auto"` runs a label-free sweep over every whole-hour timezone. Only moving ships count, because an anchored ship is in the same place at any offset. A naive version that counted every matched hull picked UTC−2 on this data. It was really measuring AIS coverage, inflated by the ships whose AIS jumped away shortly before the image. The sweep's answer must be two standard errors clear of the runner-up, or it reports "ambiguous" and keeps UTC, noted in the lineage record.
+- Each dataset builds its own read-only store (`data/processed/<name>.db`), with the manifest and timezone decision recorded in `ingest_runs`.
 
 ## Quickstart
 
@@ -119,9 +153,13 @@ cat_is_judging/                     domain-agnostic auditing core
   auditor.py   FaithfulnessAuditor
 applications/maritime_threat_detection/
   audit.py     maritime claim kinds and rules for the auditor
-  analyst_stub.py  stand-in analysts until Phase 3
+  analyst.py   LLM recon analyst (Claude Opus 5.5, tool loop, structured report)
+  analyst_stub.py  rule-based baseline analysts
+  dataset.py   manifests, column mapping, imagery loaders
+  clock_offset.py  label-free AIS timezone sweep
+  datasets/    example manifests
   db/          schema.sql, AIS spatiotemporal lookups
-  tools/       optical annotation parsing (agent tools in phase 3)
+  tools/       optical annotation parsing; agent_tools.py: the analyst's read-only tools
   scripts/     ingest_telemetry.py (ETL)
   reconciliation.py  threat rules, identity verification, blind association
   geo.py       pure-Python WGS84 <-> UTM and Sentinel-2 pixel georeferencing

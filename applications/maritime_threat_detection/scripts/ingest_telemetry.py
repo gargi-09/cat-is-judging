@@ -4,6 +4,7 @@ Usage (from the repository root)::
 
     python -m applications.maritime_threat_detection.scripts.ingest_telemetry
     python -m applications.maritime_threat_detection.scripts.ingest_telemetry --ais-utc-offset +08:00
+    python -m applications.maritime_threat_detection.scripts.ingest_telemetry --manifest path/to/dataset.json
 
 The database is rebuilt from scratch on every run and swapped in atomically. Ground truth
 for an auditor must be reproducible from raw inputs; incremental upserts would let stale
@@ -15,7 +16,8 @@ AIS track is >500 m from the optical position at acquisition (2.5%, vs 3.8% at -
 7.8% at +1 h and 8.6% at UTC+8).
 The ``eta`` column's explicit ``+08`` is a different field convention and is a trap — a
 wrong offset turns ordinary ships into dozens of false "spoofing" alerts. The offset used
-is recorded in ``ingest_runs``.
+is recorded in ``ingest_runs``. For a new dataset, ``"utc_offset": "auto"`` in its manifest
+runs a label-free sweep instead (``clock_offset.py``).
 """
 
 from __future__ import annotations
@@ -25,19 +27,29 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import statistics
 import sys
 from collections import Counter
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from applications.maritime_threat_detection import ANNOTATIONS_DIR, DATA_PROCESSED, DATA_RAW, DB_PATH
+from applications.maritime_threat_detection import DATA_PROCESSED, DATA_RAW, DB_PATH
+from applications.maritime_threat_detection.clock_offset import SweepResult, sweep
+from applications.maritime_threat_detection.dataset import (
+    DatasetManifest,
+    bundled_manifest,
+    load_imagery,
+    load_manifest,
+    read_ais,
+)
 from applications.maritime_threat_detection.db import apply_schema, connect
 from applications.maritime_threat_detection.reconciliation import cross_reference
-from applications.maritime_threat_detection.tools.vision_tools import OpticalTile, load_all_tiles
+from applications.maritime_threat_detection.tools.vision_tools import OpticalTile
 
 REQUIRED_COLUMNS: tuple[str, ...] = (
     "mmsi", "postime", "lon", "lat", "rot", "sog", "cog", "hdg", "status", "imo", "callsign",
@@ -186,11 +198,12 @@ def write_optical(conn: Any, tiles: list[OpticalTile]) -> int:
     for t in tiles:
         conn.execute(
             "INSERT INTO optical_tiles (tile_id, product_id, mgrs_tile, acquired_at, acquired_epoch, px_x, px_y, "
-            "width_px, height_px, gsd_m, lat_min, lat_max, lon_min, lon_max, n_detections, json_path, png_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "width_px, height_px, gsd_m, utm_zone, utm_south, ulx, uly, origin_source, lat_min, lat_max, lon_min, "
+            "lon_max, n_detections, json_path, png_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 t.tile_id, t.product_id, t.mgrs_tile, t.acquired_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 int(t.acquired_at.timestamp()), t.px_x, t.px_y, t.width_px, t.height_px, t.gsd_m,
+                t.utm_zone, None if t.utm_south is None else int(t.utm_south), t.ulx, t.uly, t.origin_source,
                 t.lat_min, t.lat_max, t.lon_min, t.lon_max, len(t.detections), t.json_path, t.png_path,
             ),
         )
@@ -201,8 +214,8 @@ def write_optical(conn: Any, tiles: list[OpticalTile]) -> int:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     t.tile_id, d.shape_index, d.label_raw, d.mmsi, d.center_lat, d.center_lon,
-                    d.center_px[0], d.center_px[1], d.length_m, d.width_m, d.axis_bearing_deg,
-                    d.shape_type, json.dumps(d.polygon_px),
+                    *(d.center_px or (None, None)), d.length_m, d.width_m, d.axis_bearing_deg,
+                    d.shape_type, json.dumps(d.polygon_px) if d.polygon_px else None,
                 ),
             )
             n += 1
@@ -252,15 +265,38 @@ def table_summary(conn: Any) -> dict[str, Any]:
 # ------------------------------------------------------------------------- main ------
 
 
-def run(source: Path, db_path: Path, utc_offset_text: str) -> dict[str, Any]:
+def _memory_store(positions: pd.DataFrame, vessels: pd.DataFrame, tiles: list[OpticalTile]) -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    apply_schema(conn)
+    write_ais(conn, positions, vessels)
+    write_optical(conn, tiles)
+    return conn
+
+
+def run_manifest(m: DatasetManifest, db_path: Path | None = None, utc_offset: str | None = None) -> dict[str, Any]:
+    """Build one dataset's ground-truth store from its manifest; returns the ingest report."""
     started = datetime.now(timezone.utc)
-    utc_offset = parse_utc_offset(utc_offset_text)
+    db_path = db_path or m.db_path
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    raw, source, zoned = read_ais(m)
+    tiles, imagery_dropped = load_imagery(m)
 
-    raw = pd.read_excel(source, sheet_name=0, engine="openpyxl")
-    positions, vessels, dropped, conflicts = clean_ais(raw, utc_offset)
-    tiles = load_all_tiles(ANNOTATIONS_DIR)
-    skipped_shapes = sum(t.skipped_shapes for t in tiles)
+    requested = utc_offset or m.ais.utc_offset
+    sweep_result: SweepResult | None = None
+    if zoned:
+        offset_text, method = "+00:00", "explicit_in_data"  # timestamps carried their own zone
+    elif requested == "auto":
+        positions0, vessels0, _, _ = clean_ais(raw, timedelta(0))
+        with closing(_memory_store(positions0, vessels0, tiles)) as mem:
+            sweep_result = sweep(mem)
+        offset_text = sweep_result.offset_text or "+00:00"
+        method = "auto" if sweep_result.offset_h is not None else "auto_ambiguous_kept_utc"
+    else:
+        parse_utc_offset(requested)
+        offset_text, method = requested, "manual"
 
+    positions, vessels, dropped, conflicts = clean_ais(raw, parse_utc_offset(offset_text))
     tmp = db_path.with_suffix(".db.tmp")
     tmp.unlink(missing_ok=True)
     with connect(tmp) as conn:
@@ -269,47 +305,67 @@ def run(source: Path, db_path: Path, utc_offset_text: str) -> dict[str, Any]:
         n_det = write_optical(conn, tiles)
         conn.execute(
             "INSERT INTO ingest_runs (started_at, source_file, source_sha256, ais_utc_offset, rows_read, rows_loaded, "
-            "rows_dropped_json, tiles_loaded, detections_loaded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "rows_dropped_json, tiles_loaded, detections_loaded, dataset_name, imagery_format, label_provenance, "
+            "ais_offset_method, offset_sweep_json, manifest_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 started.strftime("%Y-%m-%dT%H:%M:%SZ"), source.name,
-                hashlib.sha256(source.read_bytes()).hexdigest(), utc_offset_text,
+                hashlib.sha256(source.read_bytes()).hexdigest(), offset_text,
                 len(raw), len(positions), json.dumps(dict(dropped)), len(tiles), n_det,
+                m.name, m.imagery.format, m.label_provenance, method,
+                json.dumps(sweep_result.table) if sweep_result else None, m.model_dump_json(),
             ),
         )
         conn.commit()
         conn.execute("ANALYZE")
         summary = table_summary(conn)
-        xref = cross_reference(conn)
+        xref = cross_reference(conn, m.label_provenance)
     conn.close()
     os.replace(tmp, db_path)  # atomic swap: readers never see a half-built database
 
     report = {
+        "dataset": m.name,
         "database": db_path.as_posix(),
         "source": source.name,
-        "ais_utc_offset": utc_offset_text,
+        "ais_utc_offset": offset_text,
+        "ais_offset_method": method,
+        "offset_sweep": ({"chosen": sweep_result.offset_text, "reason": sweep_result.reason, "table": sweep_result.table}
+                         if sweep_result else None),
+        "label_provenance": m.label_provenance,
         "etl": {
             "rows_read": len(raw),
             "rows_loaded": len(positions),
             "rows_dropped": dict(dropped),
             "vessels_with_conflicting_static_fields": conflicts,
-            "annotation_shapes_skipped": skipped_shapes,
+            "imagery_rows_dropped": dict(imagery_dropped),
+            "tile_origins": dict(Counter(t.origin_source for t in tiles)),
         },
         **summary,
         "cross_reference": xref,
     }
-    (db_path.parent / "ingest_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    name = "ingest_report.json" if db_path.name == DB_PATH.name else f"{db_path.stem}_ingest_report.json"
+    (db_path.parent / name).write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
+
+
+def run(source: Path, db_path: Path, utc_offset_text: str) -> dict[str, Any]:
+    """The bundled dataset (the original entry point)."""
+    return run_manifest(bundled_manifest(source, utc_offset_text), db_path)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--manifest", type=Path, default=None, help="dataset.json describing another dataset")
     parser.add_argument("--source", type=Path, default=None, help="AIS workbook (default: auto-detect in data/raw)")
-    parser.add_argument("--db", type=Path, default=DB_PATH)
-    parser.add_argument("--ais-utc-offset", default="+00:00", help="Offset of the naive postime column (default UTC)")
+    parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--ais-utc-offset", default=None,
+                        help="Offset of naive timestamps, e.g. +08:00, or 'auto' for the label-free sweep")
     args = parser.parse_args(argv)
 
     DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
-    report = run(args.source or find_ais_source(), args.db, args.ais_utc_offset)
+    if args.manifest:
+        report = run_manifest(load_manifest(args.manifest), args.db, args.ais_utc_offset)
+    else:
+        report = run(args.source or find_ais_source(), args.db or DB_PATH, args.ais_utc_offset or "+00:00")
     json.dump(report, sys.stdout, indent=2)
     print()
     return 0

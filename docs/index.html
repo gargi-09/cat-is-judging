@@ -224,7 +224,7 @@
 <section id="sandbox">
   <div class="wrap">
     <h2>SDK sandbox</h2>
-    <p class="sub">Real SDK code on the left. <b>Execute SDK Sandbox</b> runs the equivalent logic in your browser against the simulator's current state and streams the detection log. All snippets are shipped APIs. The faithfulness audit uses stand-in analysts until the Phase 3 analyst component lands.</p>
+    <p class="sub">Real SDK code on the left. <b>Execute SDK Sandbox</b> runs the equivalent logic in your browser against the simulator's current state and streams the detection log. All snippets are shipped APIs. In the browser, the faithfulness audit uses rule-based stand-in analysts; the Phase 3 LLM analyst needs an API key, so its snippet shows the evidence its tools return.</p>
     <div class="tabs" role="tablist" id="tabs"></div>
     <div class="panel snippet" id="snippet"></div>
   </div>
@@ -252,6 +252,7 @@
       <div class="panel stat"><b>71</b><span>AIS reception gaps correctly <em>not</em> flagged as threats</span></div>
       <div class="panel stat"><b>−70%</b><span>false spoofing alerts after fixing a timestamp trap</span></div>
     </div>
+    <p class="sub" style="margin-top:16px">Three of the six vessels behind the spoofing candidates sat at anchor on their hulls until about 05:20. Then their AIS jumped tens of km away, reporting 33–48 knots, while the satellite still saw them at anchor at 06:47. That is consistent with spoofing or GNSS interference. It also fooled a naive automatic timezone check into choosing UTC−2, so the shipped check counts only moving ships and says “ambiguous” on this data instead of guessing.</p>
     <h3 style="margin-top:22px">Auditor on the same data (Phase 2)</h3>
     <p class="sub">Each of three stand-in analysts wrote one report per tile (183 tiles), re-sampled 5 times for consistency, and the guardrail decided what would be released. The analysts are placeholders until Phase 3; the point is how the guardrail treats each failure mode.</p>
     <div class="panel tablewrap"><table><thead><tr><th>Analyst</th><th>Pass</th><th>Amend</th><th>Block</th><th>What it shows</th></tr></thead><tbody>
@@ -313,8 +314,14 @@ const MATRIX = [
   { name: "Neurosymbolic fuser", desc: "Symbolic verdict outranks consistency; unverified claims capped at 0.5, so ≤ 10% may be unverified to pass 0.95", status: "shipped", phase: 2, module: "cat_is_judging/evaluators/fusion", sandbox: true },
   { name: "Guardrail interceptor", desc: "Pass, amend (cut contradictions, mark [unverified]) or block (critical claim contradicted)", status: "shipped", phase: 2, module: "cat_is_judging/guardrails", sandbox: true },
   { name: "Maritime audit rules", desc: "Presence from imagery, identity from AIS; count, dark-count, spoofing and going-dark claims", status: "shipped", phase: 2, module: "maritime_threat_detection/audit", sandbox: true },
-  { name: "Recon agent + typed tools", desc: "Analyst producing structured intel reports (replaces the stand-in analysts)", status: "next", phase: 3, module: "agents/, tools/", sandbox: false },
-  { name: "Golden evals + CI gate", desc: "Fails the build below 95% faithfulness", status: "planned", phase: 4, module: "evals/", sandbox: false },
+  { name: "Dataset manifests", desc: "Describe a new AIS + imagery dataset in a dataset.json: column mapping, timezone, label provenance; each builds its own read-only store", status: "shipped", phase: "2.5", module: "maritime_threat_detection/dataset", sandbox: false },
+  { name: "Any Sentinel-2 tile", desc: "Georeference from tile metadata (exact), the registry, or the MGRS square (~45 m); both hemispheres", status: "shipped", phase: "2.5", module: "geo.s2_grid", sandbox: false },
+  { name: "Georeferenced imagery", desc: "Detections already in lat/lon (e.g. SAR) plus scene footprints; rows without a length are dropped, never guessed", status: "shipped", phase: "2.5", module: "dataset.load_georeferenced", sandbox: false },
+  { name: "Label-free AIS clock sweep", desc: "Finds the AIS timezone from moving ships only; says 'ambiguous' instead of guessing (it does on the bundled data)", status: "shipped", phase: "2.5", module: "clock_offset.sweep", sandbox: false },
+  { name: "Dark-vessel recall", desc: "Measured only when labels were made independently of AIS; otherwise reported as not measurable", status: "shipped", phase: "2.5", module: "reconciliation.cross_reference", sandbox: false },
+  { name: "Recon analyst (LLM)", desc: "Claude Opus 5.5 investigates a tile and writes a structured report → atomic claims → auditor → guardrail. Tested offline; live results not yet published", status: "shipped", phase: 3, module: "maritime_threat_detection/analyst", sandbox: true },
+  { name: "Typed analyst tools", desc: "Seven read-only tools: hulls without identities, AIS estimates with uncertainty, measurements rather than verdicts", status: "shipped", phase: 3, module: "tools/agent_tools", sandbox: true },
+  { name: "Golden evals + CI gate", desc: "Fails the build below 95% faithfulness", status: "next", phase: 4, module: "evals/", sandbox: false },
   { name: "CLI + FastAPI service", desc: "audit-tile command and /audit endpoint", status: "planned", phase: 5, module: "main.py", sandbox: false },
 ];
 
@@ -1059,6 +1066,41 @@ decision = guard.<span class="f">intercept</span>(
       if (d.action === "block") { yield ["ALERT", `BLOCK · FaithfulnessViolation: ${d.reason}. Nothing released.`]; return; }
       yield [d.action === "pass" ? "OK" : "WARN", `${d.action.toUpperCase()} · ${d.reason}${d.amended ? ` · amended score ${d.amended.score.toFixed(3)}` : ""}`];
       for (const c of d.released.claims) yield ["SIM", `released: ${describe(c)}`];
+    },
+  },
+  {
+    id: "analyst", title: "Recon analyst (LLM)", tag: ["shipped", "Phase 3 · shipped"],
+    desc: "Phase 3: Claude Opus 5.5 investigates a tile through seven typed, read-only tools and writes a structured report, which becomes atomic claims for the auditor. The model can't run in your browser (it needs an API key), so this runs the analyst's tools against the current pass and shows exactly the evidence it gets: hulls without identities, AIS estimates with uncertainties, and hull-to-AIS measurements. Note that no tool hands it a verdict on spoofing. That's the analyst's call, and the auditor's to check.",
+    code: `<span class="k">from</span> applications.maritime_threat_detection.analyst <span class="k">import</span> ReconAnalyst
+<span class="k">from</span> applications.maritime_threat_detection.audit <span class="k">import</span> MaritimeGroundTruth, make_guardrail
+
+analyst = <span class="f">ReconAnalyst</span>(effort=<span class="s">"high"</span>)        <span class="c"># claude-opus-5-5, refusal fallback on</span>
+gt = <span class="f">MaritimeGroundTruth</span>(conn)                 <span class="c"># read-only; labels never exposed</span>
+
+<span class="c"># tools: get_tile, list_hulls, ais_near_tile, ais_track,</span>
+<span class="c">#        compare_hull_to_ais, check_mmsi, ais_silence</span>
+decision = <span class="f">make_guardrail</span>().<span class="f">intercept</span>(
+    analyst.<span class="f">generator</span>(gt, tile_id),   <span class="c"># run 0 = report, 1..n = re-runs</span>
+    gt, n_samples=<span class="n">2</span>)
+<span class="f">print</span>(decision.action, decision.audit.score)`,
+    run: function* () {
+      const r = currentPass(), A = lookup(), t = r.t;
+      yield ["INFO", `get_tile → acquired ${iso(t)}, ${r.detections.length} hulls detected`];
+      yield ["INFO", "list_hulls → (no identities: the labels are never shown to the analyst)"];
+      for (const [i, d] of r.detections.entries())
+        yield ["SIM", `  hull ${i}: ${fmtLL(d.hull)}  length ${d.v.len} m  axis ${Math.round(deg(d.v.hdg) % 180)}°`];
+      const cands = [...A.registry].map(m => A.pos(m, t)).filter(p => p && nearTile(p));
+      yield ["INFO", `ais_near_tile → ${cands.length} AIS estimates at the image time`];
+      for (const p of cands)
+        yield ["SIM", `  mmsi=${p.mmsi} ${fmtLL(p)} via ${p.method}, ±${Math.round(p.unc)} m${inTile(p) ? "" : "  (outside footprint)"}`];
+      yield ["INFO", "compare_hull_to_ais → each hull vs its nearest AIS estimate"];
+      for (const [i, d] of r.detections.entries()) {
+        const near = cands.map(p => [dist(d.hull, p), p]).sort((a, b) => a[0] - b[0])[0];
+        if (!near) { yield ["WARN", `  hull ${i}: no AIS estimate nearby`]; continue; }
+        const [dd, p] = near, tol = tolerance(p);
+        yield [dd <= tol ? "OK" : "WARN", `  hull ${i} ↔ mmsi=${p.mmsi}: ${Math.round(dd)} m, tolerance ${Math.round(tol)} m → ${dd <= tol ? "within" : "outside"}`];
+      }
+      yield ["SIM", "This is the analyst's evidence. Running the model needs an API key: locally, the dashboard's “Run the LLM analyst” sends it to Claude Opus 5.5 and the guardrail checks the report."];
     },
   },
   {
