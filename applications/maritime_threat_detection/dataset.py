@@ -87,7 +87,8 @@ class DatasetManifest(BaseModel):
         return v
 
     def resolve(self, rel: str) -> Path:
-        p = Path(rel)
+        """Paths are relative to the manifest; ``{data_raw}`` means the configured raw-data folder."""
+        p = Path(rel.replace("{data_raw}", str(DATA_RAW)))
         return p if p.is_absolute() else (self.base_dir / p)
 
     @property

@@ -3,7 +3,8 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![CI](https://github.com/gargi-09/cat-is-judging/actions/workflows/ci.yml/badge.svg)](https://github.com/gargi-09/cat-is-judging/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/release-v0.1.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-phase%203%20of%205-orange)](#roadmap)
 [![Interactive Sandbox](https://img.shields.io/badge/interactive-sandbox-7c3aed?logo=githubpages&logoColor=white)](https://gargi-09.github.io/cat-is-judging/)
 
@@ -22,6 +23,8 @@ The library (`cat_is_judging/`) is domain-agnostic. It is showcased through a pr
 The sandbox runs on simulated data, using a JavaScript port of the repo's reconciliation rules and auditor core. The source is [`docs/index.html`](docs/index.html).
 
 ## Roadmap
+
+**Latest release: v0.1.0** (Phases 1–3). See the [changelog](CHANGELOG.md) for what's in it and its known limitations. v0.2 adds the Phase 4 evaluation set and CI faithfulness gate; 1.0 follows Phase 5.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -130,17 +133,44 @@ python -m applications.maritime_threat_detection.scripts.ingest_telemetry --mani
 
 The fastest way to see it work is the **[interactive sandbox](https://gargi-09.github.io/cat-is-judging/)**. Nothing to install.
 
-To run the code locally, install it and run the test suite. The tests use small synthetic fixtures, so no dataset is needed:
+**Install the release** (Python 3.10+). The core auditor needs only Pydantic; add `[maritime]` for the maritime application and `[agent]` for the LLM analyst:
+
+```bash
+pip install "cat-is-judging[maritime] @ git+https://github.com/gargi-09/cat-is-judging@v0.1.0"
+```
+
+```python
+from cat_is_judging import Claim, FaithfulnessAuditor, Guardrail, Report, rule
+
+@rule("capital")
+def capital(claim, truth):
+    if truth.get(claim.subject) is None:
+        return "unverifiable", "no record"
+    ok = truth[claim.subject] == claim.attributes["city"]
+    return ("supported" if ok else "contradicted"), f"record says {truth[claim.subject]}"
+
+report = Report(id="r1", claims=(
+    Claim(id="a", kind="capital", subject="France", attributes={"city": "Paris"}, text="France's capital is Paris"),
+    Claim(id="b", kind="capital", subject="Japan", attributes={"city": "Kyoto"}, text="Japan's capital is Kyoto"),
+))
+decision = Guardrail(FaithfulnessAuditor([capital])).review(report, {"France": "Paris", "Japan": "Tokyo"})
+print(decision.action)              # amend
+print(decision.released.render())   # - France's capital is Paris   (the false claim is cut)
+```
+
+**Develop or run the tests** from a clone. The tests use small synthetic fixtures, so no dataset is needed:
 
 ```bash
 git clone https://github.com/gargi-09/cat-is-judging.git
 cd cat-is-judging
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt   # Windows; use .venv/bin/python elsewhere
-python -m pytest
+.venv/Scripts/python -m pip install -e ".[maritime,agent,dev]"   # Windows; use .venv/bin/python elsewhere
+.venv/Scripts/python -m pytest
 ```
 
-> **Have the raw data?** The AIS and Sentinel-2 files aren't distributed with the repo. If you have them, place them under `applications/maritime_threat_detection/data/raw/` (`raw_ais_data*.xlsx`, `json/`, `png/`). Then `python -m applications.maritime_threat_detection.scripts.ingest_telemetry` builds the database and an `ingest_report.json` with the results above.
+`requirements.txt` pins the exact environment the published results were produced with (Python 3.11+).
+
+> **Have the raw data?** The AIS and Sentinel-2 files aren't distributed with the repo. Data lives in `applications/maritime_threat_detection/data/` in a clone, `~/.cat-is-judging/maritime/` for an installed package, or wherever `CAT_IS_JUDGING_DATA` points. Put the files under its `raw/` folder (`raw_ais_data*.xlsx`, `json/`, `png/`), then `python -m applications.maritime_threat_detection.scripts.ingest_telemetry` builds the database and an `ingest_report.json` with the results above.
 
 
 ## Layout

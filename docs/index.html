@@ -269,13 +269,16 @@
 <section id="quickstart">
   <div class="wrap">
     <h2>Quick start</h2>
-    <p class="sub">You're already in the fastest way to try it: everything above runs in your browser. To run the code locally (Python 3.10+), install it and run the test suite. The tests use small synthetic fixtures, so no dataset is needed.</p>
-<pre class="qs"><span class="c"># clone, install and run the tests</span>
+    <p class="sub">You're already in the fastest way to try it: everything above runs in your browser. To use the SDK (Python 3.10+), install the v0.1.0 release. To develop, clone it and run the tests; they use small synthetic fixtures, so no dataset is needed.</p>
+<pre class="qs"><span class="c"># install the release (core + maritime application)</span>
+pip install "cat-is-judging[maritime] @ git+https://github.com/gargi-09/cat-is-judging@v0.1.0"
+
+<span class="c"># or clone, install and run the tests</span>
 git clone https://github.com/gargi-09/cat-is-judging.git
 cd cat-is-judging
 python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt     <span class="c"># Windows: .venv\Scripts\python</span>
-python -m pytest</pre>
+.venv/bin/python -m pip install -e ".[maritime,agent,dev]"     <span class="c"># Windows: .venv\Scripts\python</span>
+.venv/bin/python -m pytest</pre>
     <p class="sub" style="margin-top:14px"><b>Have the raw data?</b> The AIS and Sentinel-2 files aren't distributed with the repo. If you have them, place them under <code>applications/maritime_threat_detection/data/raw/</code> and run <code>python -m applications.maritime_threat_detection.scripts.ingest_telemetry</code> to build the database and reproduce the results above.</p>
   </div>
 </section>
@@ -319,6 +322,7 @@ const MATRIX = [
   { name: "Georeferenced imagery", desc: "Detections already in lat/lon (e.g. SAR) plus scene footprints; rows without a length are dropped, never guessed", status: "shipped", phase: "2.5", module: "dataset.load_georeferenced", sandbox: false },
   { name: "Label-free AIS clock sweep", desc: "Finds the AIS timezone from moving ships only; says 'ambiguous' instead of guessing (it does on the bundled data)", status: "shipped", phase: "2.5", module: "clock_offset.sweep", sandbox: false },
   { name: "Dark-vessel recall", desc: "Measured only when labels were made independently of AIS; otherwise reported as not measurable", status: "shipped", phase: "2.5", module: "reconciliation.cross_reference", sandbox: false },
+  { name: "Installable release (v0.1.0)", desc: "Wheel with its data files, data directory outside the package, CI on Python 3.10–3.13 plus a clean-install smoke test", status: "shipped", phase: 3, module: "pyproject.toml, .github/", sandbox: false },
   { name: "Recon analyst (LLM)", desc: "Claude Opus 5.5 investigates a tile and writes a structured report → atomic claims → auditor → guardrail. Tested offline; live results not yet published", status: "shipped", phase: 3, module: "maritime_threat_detection/analyst", sandbox: true },
   { name: "Typed analyst tools", desc: "Seven read-only tools: hulls without identities, AIS estimates with uncertainty, measurements rather than verdicts", status: "shipped", phase: 3, module: "tools/agent_tools", sandbox: true },
   { name: "Golden evals + CI gate", desc: "Fails the build below 95% faithfulness", status: "next", phase: 4, module: "evals/", sandbox: false },

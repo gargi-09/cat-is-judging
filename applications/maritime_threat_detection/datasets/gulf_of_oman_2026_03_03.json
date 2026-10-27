@@ -1,14 +1,14 @@
 {
   "name": "gulf_of_oman_2026_03_03",
-  "description": "The bundled drop: one day of AIS and 183 Sentinel-2 chips over the Gulf of Oman. Labels were made by matching hulls to AIS.",
+  "description": "The bundled drop: one day of AIS and 183 Sentinel-2 chips over the Gulf of Oman. Labels were made by matching hulls to AIS. {data_raw} is the raw-data folder (see CAT_IS_JUDGING_DATA).",
   "label_provenance": "ais_matched",
   "ais": {
-    "path": "../data/raw/raw_ais_data.xlsx.xlsx",
+    "path": "{data_raw}/raw_ais_data.xlsx.xlsx",
     "utc_offset": "+00:00"
   },
   "imagery": {
     "format": "sentinel2_labelme",
-    "annotations": "../data/raw/json",
-    "images": "../data/raw/png"
+    "annotations": "{data_raw}/json",
+    "images": "{data_raw}/png"
   }
 }

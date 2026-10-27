@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +7,24 @@ name = "cat-is-judging"
 version = "0.1.0"
 description = "Neurosymbolic faithfulness auditor for RAG and multi-agent systems"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Gargi Vipat" }]
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.7",
 ]
+keywords = ["llm", "evaluation", "faithfulness", "hallucination", "guardrails", "ais", "sentinel-2"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/gargi-09/cat-is-judging"
+Sandbox = "https://gargi-09.github.io/cat-is-judging/"
+Changelog = "https://github.com/gargi-09/cat-is-judging/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 maritime = [
@@ -26,6 +40,12 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["cat_is_judging*", "applications*"]
+
+# Non-Python files the code reads at runtime. Without these an installed package can't
+# build a database (schema.sql) or ship its example manifests.
+[tool.setuptools.package-data]
+"applications.maritime_threat_detection.db" = ["schema.sql"]
+"applications.maritime_threat_detection" = ["datasets/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
